@@ -142,6 +142,19 @@ class CoreTests(unittest.TestCase):
             self.assertEqual([part.bevel for part in parts], ["P", "W"])
             self.assertEqual([part.total_weight_kg for part in parts], [126.0, 368.0])
 
+    def test_empty_sheet_before_summary_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            path = Path(name) / "含空表模板.xlsx"
+            workbook = Workbook()
+            workbook.active.title = "空表"
+            sheet = workbook.create_sheet("汇总")
+            sheet.append(["订单号", "图号", "厚度", "件数", "坡口", "重量"])
+            sheet.append(["THP10-3150F-0910", "19Y01-01", 100, 8, "P", 0.126])
+            workbook.save(path)
+            parts = read_summary_workbook(path, "王振海/正在加工/THP10")
+            self.assertEqual(len(parts), 1)
+            self.assertEqual(parts[0].drawing_no, "19Y01-01")
+
     def test_missing_cached_weight_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as name:
             path = Path(name) / "汇总表.xlsx"

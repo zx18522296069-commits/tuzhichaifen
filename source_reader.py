@@ -40,7 +40,10 @@ def read_summary_workbook(path: Path, source_path: str) -> list[SourcePart]:
     headers: dict[str, int] = {}
     value_ws = None
     for worksheet in value_wb.worksheets:
-        for row in worksheet.iter_rows(min_row=1, max_row=min(worksheet.max_row, 20)):
+        max_header_row = min(worksheet.max_row or 0, 20)
+        if max_header_row < 1:
+            continue
+        for row in worksheet.iter_rows(min_row=1, max_row=max_header_row):
             values = [_normal(cell.value) for cell in row]
             if "订单号" in values and "图号" in values and "厚度" in values and "件数" in values:
                 value_ws = worksheet
