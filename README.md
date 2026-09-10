@@ -41,7 +41,7 @@ Excel 使用图片文件名第一个空格前的“板材主名称”，不把�
 ## GitHub Secrets
 
 - `GOOGLE_SERVICE_ACCOUNT_JSON`：完整服务账号 JSON；服务账号必须至少拥有 `王振海` 根目录的编辑权限。
-- `DRIVE_ROOT_FOLDER_ID`：`王振海` 根目录 ID。
+`王振海` 根目录 ID 已配置在工作流中，不需要重复添加 Secret。
 
 ## 执行方式
 

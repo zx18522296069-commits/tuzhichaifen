@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 30
     env:
       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-      DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}
+      DRIVE_ROOT_FOLDER_ID: "1zM-DIWR_7ruB-41G7VETmVmCnKqB2WqM"
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -57,7 +57,6 @@ jobs:
       - name: 检查凭据
         run: |
           test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || { echo "缺少 GOOGLE_SERVICE_ACCOUNT_JSON"; exit 1; }
-          test -n "$DRIVE_ROOT_FOLDER_ID" || { echo "缺少 DRIVE_ROOT_FOLDER_ID"; exit 1; }
 
       - name: 扫描并生成
         shell: bash
