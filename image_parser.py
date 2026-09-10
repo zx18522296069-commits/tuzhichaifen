@@ -17,8 +17,8 @@ class ImageParseError(RuntimeError):
 
 _PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+"
-    r"(?P<order>(?:[A-Z0-9]+(?:-[A-Z0-9]+){2,}|\d{8,}-\d{4}))\s+"
-    r"(?P<drawing>[A-Z0-9]+(?:-[A-Z0-9]+){2,}[A-Z]?)\s+"
+    r"(?P<order>[A-Z0-9]+(?:-[A-Z0-9]+)*)\s+"
+    r"(?P<drawing>[A-Z0-9]+(?:-[A-Z0-9]+)+[A-Z]?)\s+"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
@@ -167,7 +167,9 @@ def parse_image(path: Path, original_filename: str | None = None) -> ImageData:
     with Image.open(path) as image:
         _, height = image.size
         title_top = _horizontal_rule_y(image) / height
-        part_crop = _prepare_crop(image, (0.005, title_top + 0.008, 0.62, min(0.90, title_top + 0.18)), 6)
+        # Scale 4 preserves the narrow T/1 strokes in short order codes better
+        # than the heavier enlargement used for the surrounding title block.
+        part_crop = _prepare_crop(image, (0.005, title_top + 0.008, 0.62, min(0.90, title_top + 0.18)), 4, 0)
         weight_crop = _prepare_crop(image, (0.840, title_top + 0.002, 0.995, min(0.86, title_top + 0.075)), 8, 0)
         program_crop = _prepare_crop(image, (0.875, 0.90, 0.995, 0.995), 8, 0)
         bottom_crop = _prepare_crop(image, (0.00, title_top, 1.00, 1.00), 4)

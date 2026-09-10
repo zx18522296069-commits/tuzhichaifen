@@ -34,6 +34,16 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(_parse_weight("重量 14307.%ke"), 14307.96)
         self.assertEqual(_parse_program("代码文件名 NI84"), "N184")
 
+    def test_short_order_and_drawing_codes(self) -> None:
+        text = """
+1 05TD1 05TD1-01 T60 1J P x1
+2 05TD1 05TD2-01 T60 1J P x1
+3 05TD1 05TD2-03 T60 1J W x1
+"""
+        parts = _parse_parts(text)
+        self.assertEqual([part.order_no for part in parts], ["05TD1"] * 3)
+        self.assertEqual([part.drawing_no for part in parts], ["05TD1-01", "05TD2-01", "05TD2-03"])
+
     def test_historical_images_when_local_fixtures_exist(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         expected = {
