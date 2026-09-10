@@ -129,6 +129,19 @@ class CoreTests(unittest.TestCase):
             parts = read_summary_workbook(path, "王振海/正在加工/177")
             self.assertEqual(parts[0].total_weight_kg, 3536.0)
 
+    def test_unlabelled_structured_bevel_column(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            path = Path(name) / "无坡口标题模板.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.append(["订单号", "图号", "厚度", "件数", "长", "宽", "切割长度", "面积", "", "重量"])
+            sheet.append(["THP10-3150F-0910", "19Y01-01", 100, 8, 160, 160, 502.65, 0.02011, "P", 0.126])
+            sheet.append(["THP10-3150F-0910", "19Y01-02", 50, 4, 220, 1080, 2882.74, 0.23442, "W", 0.368])
+            workbook.save(path)
+            parts = read_summary_workbook(path, "王振海/正在加工/THP10")
+            self.assertEqual([part.bevel for part in parts], ["P", "W"])
+            self.assertEqual([part.total_weight_kg for part in parts], [126.0, 368.0])
+
     def test_missing_cached_weight_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as name:
             path = Path(name) / "汇总表.xlsx"

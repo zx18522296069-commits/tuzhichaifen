@@ -64,7 +64,6 @@ def read_summary_workbook(path: Path, source_path: str) -> list[SourcePart]:
     drawing_col = column("图号")
     thickness_col = column("厚度")
     quantity_col = column("件数")
-    bevel_col = column("坡口")
     weight_col = None
     weight_multiplier = None
     for name, multiplier in (
@@ -81,6 +80,28 @@ def read_summary_workbook(path: Path, source_path: str) -> list[SourcePart]:
             break
     if weight_col is None or weight_multiplier is None:
         raise SourceReadError(f"{path.name} 缺少总重量字段（kg、t 或模板重量）")
+
+    bevel_col = headers.get("坡口")
+    if bevel_col is None:
+        # Some production summary sheets keep the bevel values in the normal
+        # detail column but leave that column's heading blank.  Only accept a
+        # single column between quantity and weight whose populated detail
+        # values are unambiguous bevel codes; otherwise stop instead of
+        # guessing.
+        candidates: list[int] = []
+        for candidate in range(quantity_col + 1, weight_col):
+            values: list[str] = []
+            for row_no in range(header_row + 1, value_ws.max_row + 1):
+                if not _normal(value_ws.cell(row_no, drawing_col).value):
+                    continue
+                value = _normal(value_ws.cell(row_no, candidate).value)
+                if value:
+                    values.append(value)
+            if values and all(re.fullmatch(r"[A-Z][A-Z0-9]{0,3}", value) for value in values):
+                candidates.append(candidate)
+        if len(candidates) != 1:
+            raise SourceReadError(f"{path.name} 缺少字段：坡口")
+        bevel_col = candidates[0]
     result: list[SourcePart] = []
     for row_no in range(header_row + 1, value_ws.max_row + 1):
         drawing = _normal(value_ws.cell(row_no, drawing_col).value)
