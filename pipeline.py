@@ -51,7 +51,14 @@ def _load_channel(
             local_path = workdir / channel_name / effective_id / item["name"]
             drive.download(item["id"], local_path)
             source_path = f"王振海/{channel_name}/{folder_item['name']}"
-            source_parts.extend(read_summary_workbook(local_path, source_path))
+            try:
+                source_parts.extend(read_summary_workbook(local_path, source_path))
+            except SourceReadError as exc:
+                # Source folders can contain legacy or auxiliary workbooks that
+                # happen to use a summary-like filename.  Keep scanning other
+                # orders; an image that depends on this file will still fail
+                # strict matching and will not be renamed.
+                LOGGER.warning("跳过不可读基础表：%s/%s：%s", source_path, item["name"], exc)
     return source_parts
 
 
