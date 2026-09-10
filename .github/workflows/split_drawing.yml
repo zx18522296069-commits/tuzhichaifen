@@ -1,0 +1,74 @@
+name: 图纸拆分自动化
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.py"
+      - "requirements.txt"
+      - ".github/workflows/split_drawing.yml"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "仅验证，不写回 Google Drive"
+        required: true
+        default: true
+        type: boolean
+      only:
+        description: "只处理文件名中包含的文本（可留空）"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: split-drawing-production
+  cancel-in-progress: false
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装 OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 单元测试
+        run: python -m unittest discover -s tests -v
+
+      - name: 检查凭据
+        run: |
+          test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || { echo "缺少 GOOGLE_SERVICE_ACCOUNT_JSON"; exit 1; }
+          test -n "$DRIVE_ROOT_FOLDER_ID" || { echo "缺少 DRIVE_ROOT_FOLDER_ID"; exit 1; }
+
+      - name: 扫描并生成
+        shell: bash
+        run: |
+          mkdir -p logs
+          args=(--output-dir output)
+          if [[ "${{ github.event_name }}" == "push" ]] || \
+             [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          if [[ -n "${{ inputs.only }}" ]]; then
+            args+=(--only "${{ inputs.only }}")
+          fi
+          python main.py "${args[@]}" 2>&1 | tee "logs/run-${GITHUB_RUN_ID}.log"
