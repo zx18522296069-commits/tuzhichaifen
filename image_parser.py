@@ -35,6 +35,13 @@ _NAMED_PART_RE = re.compile(
     re.IGNORECASE,
 )
 
+_UNNAMED_PART_RE = re.compile(
+    r"^\s*(?P<index>\d+)\s+.*?\s*T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
+    r"(?P<base_quantity>\d+)\S*?\s+"
+    r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
+    re.IGNORECASE,
+)
+
 
 def _prepare_crop(
     image: Image.Image,
@@ -117,17 +124,29 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
             )
         else:
             named_match = _NAMED_PART_RE.search(line)
-            if not named_match:
-                continue
-            part = ImagePart(
-                index=int(named_match.group("index")),
-                order_no="",
-                drawing_no=re.sub(r"\s+", "", named_match.group("drawing")).upper(),
-                thickness=float(named_match.group("thickness").replace(",", ".")),
-                base_quantity=int(named_match.group("base_quantity")),
-                bevel=named_match.group("bevel").upper(),
-                split_quantity=int(named_match.group("split_quantity")),
-            )
+            if named_match:
+                part = ImagePart(
+                    index=int(named_match.group("index")),
+                    order_no="",
+                    drawing_no=re.sub(r"\s+", "", named_match.group("drawing")).upper(),
+                    thickness=float(named_match.group("thickness").replace(",", ".")),
+                    base_quantity=int(named_match.group("base_quantity")),
+                    bevel=named_match.group("bevel").upper(),
+                    split_quantity=int(named_match.group("split_quantity")),
+                )
+            else:
+                unnamed_match = _UNNAMED_PART_RE.search(line)
+                if not unnamed_match:
+                    continue
+                part = ImagePart(
+                    index=int(unnamed_match.group("index")),
+                    order_no="",
+                    drawing_no="",
+                    thickness=float(unnamed_match.group("thickness").replace(",", ".")),
+                    base_quantity=int(unnamed_match.group("base_quantity")),
+                    bevel=unnamed_match.group("bevel").upper(),
+                    split_quantity=int(unnamed_match.group("split_quantity")),
+                )
         found.setdefault(part.index, Counter())[part] += 1
     selected: list[ImagePart] = []
     for index, candidates in sorted(found.items()):
@@ -158,7 +177,14 @@ def _parse_parts_from_variants(texts: list[str]) -> tuple[ImagePart, ...]:
             continue
     if not candidates:
         raise ImageParseError("未能从图片识别出连续的零件索引")
-    return max(candidates, key=len)
+    longest = max(len(candidate) for candidate in candidates)
+    complete = [candidate for candidate in candidates if len(candidate) == longest]
+    counts = Counter(complete)
+    best_count = max(counts.values())
+    best = [candidate for candidate, count in counts.items() if count == best_count]
+    if len(best) != 1:
+        raise ImageParseError("OCR 多次识别结果不一致，无法安全选择零件数据")
+    return best[0]
 
 
 def _parse_weight(text: str) -> float:

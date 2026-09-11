@@ -17,6 +17,8 @@ def _same_number(left: float, right: float) -> bool:
 
 
 def _same_drawing(image: ImagePart, source: SourcePart) -> bool:
+    if not image.drawing_no:
+        return True
     if source.drawing_no == image.drawing_no:
         return True
     if image.order_no != SPECIAL_ORDER or source.order_no != SPECIAL_ORDER:
@@ -43,7 +45,7 @@ def match_one(image: ImagePart, source_parts: Iterable[SourcePart]) -> SourcePar
     if len(candidates) == 1:
         return candidates[0]
     key = (
-        f"订单={image.order_no or '图片未标注'}, 图号={image.drawing_no}, 厚度={image.thickness:g}, "
+        f"订单={image.order_no or '图片未识别'}, 图号={image.drawing_no or '图片未识别'}, 厚度={image.thickness:g}, "
         f"坡口={image.bevel}, 基础件数={image.base_quantity}"
     )
     if not candidates:

@@ -56,6 +56,15 @@ class CoreTests(unittest.TestCase):
         with self.assertRaises(MatchError):
             match_one(part, [source, duplicate])
 
+    def test_unreadable_name_falls_back_to_unique_physical_fields(self) -> None:
+        parts = _parse_parts("1 ib A T40 100J P x 33")
+        self.assertEqual(parts[0], ImagePart(1, "", "", 40, 100, "P", 33))
+        source = SourcePart("YT71S-2000WA-0711", "吊耳", 40, 100, "P", 1234, "路径", "汇总表.xlsx")
+        self.assertEqual(match_one(parts[0], [source]), source)
+        duplicate = SourcePart("OTHER-ORDER-0001", "其他吊耳", 40, 100, "P", 900, "其他路径", "汇总表.xlsx")
+        with self.assertRaises(MatchError):
+            match_one(parts[0], [source, duplicate])
+
     def test_short_order_and_drawing_codes(self) -> None:
         text = """
 1 05TD1 05TD1-01 T60 1J P x1
