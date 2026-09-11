@@ -4,6 +4,7 @@ import re
 import subprocess
 import tempfile
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -18,7 +19,16 @@ class ImageParseError(RuntimeError):
 _PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+"
     r"(?P<order>[A-Z0-9]+(?:-[A-Z0-9]+)*)\s+"
-    r"(?P<drawing>[A-Z0-9]+(?:-[A-Z0-9]+)+[A-Z]?)\s+"
+    r"(?P<drawing>[A-Z0-9.]+(?:-[A-Z0-9.]+)+[A-Z]?)\s+"
+    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
+    r"(?P<base_quantity>\d+)\S*?\s+"
+    r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
+    re.IGNORECASE,
+)
+
+_NAMED_PART_RE = re.compile(
+    r"^\s*(?P<index>\d+)\s+"
+    r"(?P<drawing>[\u3400-\u9fff][\u3400-\u9fffA-Z0-9._-]*)\s+"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
@@ -44,11 +54,25 @@ def _prepare_crop(
     return crop.resize((crop.width * scale, crop.height * scale), Image.Resampling.LANCZOS)
 
 
+@lru_cache(maxsize=1)
+def _tesseract_languages() -> str:
+    languages = "eng"
+    available = subprocess.run(
+        ["tesseract", "--list-langs"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if "chi_sim" in available.stdout.split():
+        languages = "eng+chi_sim"
+    return languages
+
+
 def _tesseract(image: Image.Image, psm: int) -> str:
     with tempfile.NamedTemporaryFile(suffix=".png") as handle:
         image.save(handle.name)
         result = subprocess.run(
-            ["tesseract", handle.name, "stdout", "-l", "eng", "--psm", str(psm)],
+            ["tesseract", handle.name, "stdout", "-l", _tesseract_languages(), "--psm", str(psm)],
             check=False,
             capture_output=True,
             text=True,
@@ -81,17 +105,29 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
     for raw_line in text.splitlines():
         line = re.sub(r"\s+", " ", raw_line.upper().replace("—", "-").replace("–", "-")).strip()
         match = _PART_RE.search(line)
-        if not match:
-            continue
-        part = ImagePart(
-            index=int(match.group("index")),
-            order_no=match.group("order").upper(),
-            drawing_no=match.group("drawing").upper(),
-            thickness=float(match.group("thickness").replace(",", ".")),
-            base_quantity=int(match.group("base_quantity")),
-            bevel=match.group("bevel").upper(),
-            split_quantity=int(match.group("split_quantity")),
-        )
+        if match:
+            part = ImagePart(
+                index=int(match.group("index")),
+                order_no=match.group("order").upper(),
+                drawing_no=match.group("drawing").upper(),
+                thickness=float(match.group("thickness").replace(",", ".")),
+                base_quantity=int(match.group("base_quantity")),
+                bevel=match.group("bevel").upper(),
+                split_quantity=int(match.group("split_quantity")),
+            )
+        else:
+            named_match = _NAMED_PART_RE.search(line)
+            if not named_match:
+                continue
+            part = ImagePart(
+                index=int(named_match.group("index")),
+                order_no="",
+                drawing_no=named_match.group("drawing").upper(),
+                thickness=float(named_match.group("thickness").replace(",", ".")),
+                base_quantity=int(named_match.group("base_quantity")),
+                bevel=named_match.group("bevel").upper(),
+                split_quantity=int(named_match.group("split_quantity")),
+            )
         found.setdefault(part.index, Counter())[part] += 1
     selected: list[ImagePart] = []
     for index, candidates in sorted(found.items()):

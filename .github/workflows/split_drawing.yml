@@ -49,7 +49,7 @@ jobs:
       - name: 安装 OCR
         run: |
           sudo apt-get update
-          sudo apt-get install -y tesseract-ocr
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-chi-sim
 
       - name: 安装依赖
         run: pip install -r requirements.txt

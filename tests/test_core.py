@@ -8,7 +8,7 @@ from openpyxl import Workbook, load_workbook
 
 from excel_writer import validate_result, write_result
 from image_parser import _parse_parts, _parse_program, _parse_weight, main_name_from_filename, parse_image
-from matcher import MatchError, match_image
+from matcher import MatchError, match_image, match_one
 from models import ImageData, ImagePart, SourcePart
 from source_reader import SourceReadError, read_summary_workbook
 
@@ -33,6 +33,28 @@ class CoreTests(unittest.TestCase):
     def test_common_ocr_confusions(self) -> None:
         self.assertEqual(_parse_weight("重量 14307.%ke"), 14307.96)
         self.assertEqual(_parse_program("代码文件名 NI84"), "N184")
+
+    def test_chinese_named_part_without_order_number(self) -> None:
+        text = """
+1 YT71S-2000WA-0711 1007-01-02 T40 4J P x 2
+2 吊耳 T40 100J P x 33
+3 YT71S-2500Z-0715 1004-01-16 T40 4J P x 4
+4 YT71S-2000WA-0711 1004-01-14.2 T40 4J P x 1
+"""
+        parts = _parse_parts(text)
+        self.assertEqual([part.index for part in parts], [1, 2, 3, 4])
+        self.assertEqual(parts[1].order_no, "")
+        self.assertEqual(parts[1].drawing_no, "吊耳")
+        self.assertEqual(parts[1].base_quantity, 100)
+        self.assertEqual(parts[1].split_quantity, 33)
+
+    def test_chinese_named_part_requires_unique_source_match(self) -> None:
+        part = ImagePart(2, "", "吊耳", 40, 100, "P", 33)
+        source = SourcePart("YT71S-2000WA-0711", "吊耳", 40, 100, "P", 1234, "路径", "汇总表.xlsx")
+        self.assertEqual(match_one(part, [source]), source)
+        duplicate = SourcePart("OTHER-ORDER-0001", "吊耳", 40, 100, "P", 1234, "其他路径", "汇总表.xlsx")
+        with self.assertRaises(MatchError):
+            match_one(part, [source, duplicate])
 
     def test_short_order_and_drawing_codes(self) -> None:
         text = """

@@ -30,7 +30,7 @@ def find_candidates(image: ImagePart, source_parts: Iterable[SourcePart]) -> lis
     return [
         source
         for source in source_parts
-        if source.order_no == image.order_no
+        if (not image.order_no or source.order_no == image.order_no)
         and _same_drawing(image, source)
         and _same_number(source.thickness, image.thickness)
         and source.base_quantity == image.base_quantity
@@ -43,7 +43,7 @@ def match_one(image: ImagePart, source_parts: Iterable[SourcePart]) -> SourcePar
     if len(candidates) == 1:
         return candidates[0]
     key = (
-        f"订单={image.order_no}, 图号={image.drawing_no}, 厚度={image.thickness:g}, "
+        f"订单={image.order_no or '图片未标注'}, 图号={image.drawing_no}, 厚度={image.thickness:g}, "
         f"坡口={image.bevel}, 基础件数={image.base_quantity}"
     )
     if not candidates:
