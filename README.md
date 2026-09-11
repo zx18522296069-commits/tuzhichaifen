@@ -40,8 +40,20 @@ Excel 使用图片文件名第一个空格前的“板材主名称”，不把�
 
 ## GitHub Secrets
 
-- `GOOGLE_SERVICE_ACCOUNT_JSON`：完整服务账号 JSON；服务账号必须至少拥有 `王振海` 根目录的编辑权限。
+- 推荐使用拥有业务网盘的 Google 用户 OAuth（个人网盘可创建新文件）：
+  - `GOOGLE_OAUTH_CLIENT_ID`
+  - `GOOGLE_OAUTH_CLIENT_SECRET`
+  - `GOOGLE_OAUTH_REFRESH_TOKEN`
+- `GOOGLE_SERVICE_ACCOUNT_JSON` 仅作为兼容后备；服务账号没有个人 Drive 存储额度，写入“我的云端硬盘”时可能无法创建新文件。
 `王振海` 根目录 ID 已配置在工作流中，不需要重复添加 Secret。
+
+OAuth 只需在本机授权一次。下载 Google Cloud“桌面应用”OAuth 客户端 JSON 后运行：
+
+```bash
+python scripts/create_google_oauth_token.py /路径/client_secret.json
+```
+
+把程序输出的三项分别设置到本仓库和 `weijiagong-lingjian-guidang` 的 Actions secrets。OAuth 三项齐全时优先使用；未设置时才回退到服务账号。
 
 ## 执行方式
 

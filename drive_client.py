@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import io
-import json
-import os
 from pathlib import Path
 
-from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+
+from google_auth import GoogleAuthError, build_credentials
 
 
 class DriveError(RuntimeError):
@@ -16,17 +15,10 @@ class DriveError(RuntimeError):
 
 class DriveClient:
     def __init__(self) -> None:
-        raw_credentials = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-        if not raw_credentials:
-            raise DriveError("缺少 GOOGLE_SERVICE_ACCOUNT_JSON")
         try:
-            info = json.loads(raw_credentials)
-        except json.JSONDecodeError as exc:
-            raise DriveError("GOOGLE_SERVICE_ACCOUNT_JSON 不是有效 JSON") from exc
-        credentials = service_account.Credentials.from_service_account_info(
-            info,
-            scopes=["https://www.googleapis.com/auth/drive"],
-        )
+            credentials = build_credentials()
+        except GoogleAuthError as exc:
+            raise DriveError(str(exc)) from exc
         self.service = build("drive", "v3", credentials=credentials, cache_discovery=False)
 
     @staticmethod
