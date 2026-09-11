@@ -41,7 +41,8 @@ def find_candidates(image: ImagePart, source_parts: Iterable[SourcePart]) -> lis
 
 
 def match_one(image: ImagePart, source_parts: Iterable[SourcePart]) -> SourcePart:
-    candidates = find_candidates(image, source_parts)
+    source_list = list(source_parts)
+    candidates = find_candidates(image, source_list)
     if len(candidates) == 1:
         return candidates[0]
     key = (
@@ -49,7 +50,19 @@ def match_one(image: ImagePart, source_parts: Iterable[SourcePart]) -> SourcePar
         f"坡口={image.bevel}, 基础件数={image.base_quantity}"
     )
     if not candidates:
-        raise MatchError(f"无唯一基础数据：{key}（找到 0 条）")
+        nearby = [
+            source
+            for source in source_list
+            if (not image.order_no or source.order_no == image.order_no)
+            and _same_drawing(image, source)
+        ]
+        details = "; ".join(
+            f"T{item.thickness:g}/{item.base_quantity}J/{item.bevel} @ "
+            f"{item.source_path}/{item.source_workbook}"
+            for item in nearby[:5]
+        )
+        suffix = f"；同订单图号候选：{details}" if details else ""
+        raise MatchError(f"无唯一基础数据：{key}（找到 0 条{suffix}）")
     paths = sorted({f"{item.source_path}/{item.source_workbook}" for item in candidates})
     raise MatchError(f"无唯一基础数据：{key}（找到 {len(candidates)} 条：{paths}）")
 
