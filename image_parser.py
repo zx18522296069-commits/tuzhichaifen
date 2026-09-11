@@ -28,7 +28,7 @@ _PART_RE = re.compile(
 
 _NAMED_PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+"
-    r"(?P<drawing>[\u3400-\u9fff][\u3400-\u9fffA-Z0-9._-]*)\s+"
+    r"(?P<drawing>[\u3400-\u9fff](?:\s*[\u3400-\u9fff])*)\s*"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
@@ -122,7 +122,7 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
             part = ImagePart(
                 index=int(named_match.group("index")),
                 order_no="",
-                drawing_no=named_match.group("drawing").upper(),
+                drawing_no=re.sub(r"\s+", "", named_match.group("drawing")).upper(),
                 thickness=float(named_match.group("thickness").replace(",", ".")),
                 base_quantity=int(named_match.group("base_quantity")),
                 bevel=named_match.group("bevel").upper(),

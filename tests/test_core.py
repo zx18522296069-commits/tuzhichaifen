@@ -37,7 +37,7 @@ class CoreTests(unittest.TestCase):
     def test_chinese_named_part_without_order_number(self) -> None:
         text = """
 1 YT71S-2000WA-0711 1007-01-02 T40 4J P x 2
-2 吊耳 T40 100J P x 33
+2 吊 耳 T40 100J P x 33
 3 YT71S-2500Z-0715 1004-01-16 T40 4J P x 4
 4 YT71S-2000WA-0711 1004-01-14.2 T40 4J P x 1
 """
