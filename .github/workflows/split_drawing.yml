@@ -1,8 +1,6 @@
 name: 图纸拆分自动化
 
 on:
-  schedule:
-    - cron: "0 * * * *"
   push:
     branches: [main]
     paths:
