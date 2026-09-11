@@ -159,6 +159,14 @@ class CoreTests(unittest.TestCase):
         )
         self.assertEqual(match_image(image, [source])[0].source, source)
 
+    def test_same_order_accepts_unique_order_prefixed_drawing(self) -> None:
+        image = ImagePart(1, "YT71S-2000WA-0711", "1007-01-02", 40, 4, "P", 2)
+        source = SourcePart(
+            "YT71S-2000WA-0711", "YT71S-2000WA-0711-1007-01-02", 40, 4, "P", 1000,
+            "王振海/拆图模版/订单", "汇总表.xlsx",
+        )
+        self.assertEqual(match_one(image, [source]), source)
+
     def test_xlsm_summary_weight_is_tonnes(self) -> None:
         with tempfile.TemporaryDirectory() as name:
             path = Path(name) / "模板.xlsm"

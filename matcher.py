@@ -21,6 +21,13 @@ def _same_drawing(image: ImagePart, source: SourcePart) -> bool:
         return True
     if source.drawing_no == image.drawing_no:
         return True
+    # 同一订单的旧模板有时把订单号重复写进图号，而排版图只显示图号后缀。
+    # 这里只接受带连字符边界的完整后缀；后续候选数量仍必须严格等于 1。
+    if image.order_no and source.order_no == image.order_no:
+        if source.drawing_no.endswith(f"-{image.drawing_no}"):
+            return True
+        if image.drawing_no.endswith(f"-{source.drawing_no}"):
+            return True
     if image.order_no != SPECIAL_ORDER or source.order_no != SPECIAL_ORDER:
         return False
     image_tokens = image.drawing_no.split("-")
