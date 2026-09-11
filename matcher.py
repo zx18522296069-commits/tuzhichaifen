@@ -52,6 +52,17 @@ def match_one(image: ImagePart, source_parts: Iterable[SourcePart]) -> SourcePar
     candidates = find_candidates(image, source_list)
     if len(candidates) == 1:
         return candidates[0]
+    if not candidates and image.order_no:
+        same_order_physical = [
+            source
+            for source in source_list
+            if source.order_no == image.order_no
+            and _same_number(source.thickness, image.thickness)
+            and source.base_quantity == image.base_quantity
+            and source.bevel == image.bevel
+        ]
+        if len(same_order_physical) == 1:
+            return same_order_physical[0]
     key = (
         f"订单={image.order_no or '图片未识别'}, 图号={image.drawing_no or '图片未识别'}, 厚度={image.thickness:g}, "
         f"坡口={image.bevel}, 基础件数={image.base_quantity}"
@@ -68,7 +79,13 @@ def match_one(image: ImagePart, source_parts: Iterable[SourcePart]) -> SourcePar
             f"{item.source_path}/{item.source_workbook}"
             for item in nearby[:5]
         )
+        physical_details = "; ".join(
+            f"{item.drawing_no} @ {item.source_path}/{item.source_workbook}"
+            for item in same_order_physical[:5]
+        ) if image.order_no else ""
         suffix = f"；同订单图号候选：{details}" if details else ""
+        if physical_details:
+            suffix += f"；同订单物理字段候选：{physical_details}"
         raise MatchError(f"无唯一基础数据：{key}（找到 0 条{suffix}）")
     paths = sorted({f"{item.source_path}/{item.source_workbook}" for item in candidates})
     raise MatchError(f"无唯一基础数据：{key}（找到 {len(candidates)} 条：{paths}）")
