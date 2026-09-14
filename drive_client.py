@@ -52,14 +52,16 @@ class DriveClient:
                 return files
 
     def find_child_folder(self, parent_id: str, name: str) -> dict:
+        # “总拆图模版”是当前正式名称；兼容早期“拆图模版”，但始终要求唯一，禁止猜测。
+        accepted_names = {"拆图模版", "总拆图模版"} if name == "拆图模版" else {name}
         folders = [
             item
             for item in self.list_children(parent_id)
-            if item.get("name") == name
+            if item.get("name") in accepted_names
             and item.get("mimeType") == "application/vnd.google-apps.folder"
         ]
         if len(folders) != 1:
-            raise DriveError(f"目录 {name!r} 应唯一，实际找到 {len(folders)} 个")
+            raise DriveError(f"目录 {sorted(accepted_names)!r} 应唯一，实际找到 {len(folders)} 个")
         return folders[0]
 
     def effective_folder_id(self, item: dict) -> str | None:
