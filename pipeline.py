@@ -28,6 +28,24 @@ class RunItem:
     status: str
     output: str | None = None
     error: str | None = None
+    stage: str | None = None
+    suggestion: str | None = None
+
+
+def _failure_detail(filename: str, exc: Exception) -> tuple[str, str, str]:
+    """把技术异常转成前端和日志中可直接处理的中文说明。"""
+    raw = str(exc).strip() or exc.__class__.__name__
+    if isinstance(exc, ImageParseError):
+        return ("图片识别失败", f"文件={filename}；OCR/版式识别未通过：{raw}", "检查原图是否完整清晰，是否包含 FastCAM 标题栏、零件清单、钢板重量和程序号；确认后保留原文件重新执行。")
+    if isinstance(exc, MatchError):
+        return ("基础数据严格匹配失败", f"文件={filename}；识别结果无法在“正在加工”或“拆图模版”中唯一核对：{raw}", "核对订单号、图号、厚度、坡口和基础件数；补齐或修正对应订单汇总表后重新执行。系统不会猜测或强行匹配。")
+    if isinstance(exc, SourceReadError):
+        return ("订单基础表读取失败", f"文件={filename}；基础表结构或字段异常：{raw}", "检查对应订单汇总表是否可打开，并确认订单号、图号、厚度、件数、坡口和重量列完整。")
+    if isinstance(exc, DriveError):
+        return ("云盘读写失败", f"文件={filename}；Google Drive 操作失败：{raw}", "检查该文件和目标目录权限、网络及 Google 凭据后重新执行。")
+    if isinstance(exc, OSError):
+        return ("本地文件处理失败", f"文件={filename}；下载、生成或保存时失败：{raw}", "检查源文件是否损坏、文件名是否合法，并重新执行该图片。")
+    return ("结果文件校验失败", f"文件={filename}；Excel 生成或公式校验未通过：{raw}", "检查该图片的识别数据及生成结果；问题未修复前不会上传 Excel，也不会给原图加“完成_”。")
 
 
 def _load_channel(
@@ -111,8 +129,10 @@ def run_drive(
                 run_items.append(RunItem(filename, "dry-run" if dry_run else "completed", result_path.name))
                 LOGGER.info("%s：%s -> %s", "验证完成" if dry_run else "处理完成", filename, result_path.name)
             except (DriveError, ImageParseError, MatchError, SourceReadError, ValueError, OSError) as exc:
-                run_items.append(RunItem(filename, "failed", error=str(exc)))
-                LOGGER.error("处理失败：%s：%s", filename, exc)
+                stage, detail, suggestion = _failure_detail(filename, exc)
+                error = f"{stage}｜{detail}｜处理建议：{suggestion}"
+                run_items.append(RunItem(filename, "failed", error=error, stage=stage, suggestion=suggestion))
+                LOGGER.error("处理失败｜阶段=%s｜%s｜处理建议=%s", stage, detail, suggestion)
 
     report_path = output_dir / "run_report.json"
     report_path.write_text(json.dumps([asdict(item) for item in run_items], ensure_ascii=False, indent=2), encoding="utf-8")
