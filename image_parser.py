@@ -177,14 +177,20 @@ def _parse_parts_from_variants(texts: list[str]) -> tuple[ImagePart, ...]:
             continue
     if not candidates:
         raise ImageParseError("未能从图片识别出连续的零件索引")
+    # 拆图的主键是“序号后的图号”。订单号、厚度、件数和坡口会再由模板严格
+    # 核验；不能因 OCR 对这些辅助字段偶发抖动而丢弃一张图。
     longest = max(len(candidate) for candidate in candidates)
     complete = [candidate for candidate in candidates if len(candidate) == longest]
-    counts = Counter(complete)
+    signatures = [tuple((part.index, part.drawing_no) for part in candidate) for candidate in complete]
+    counts = Counter(signatures)
     best_count = max(counts.values())
-    best = [candidate for candidate, count in counts.items() if count == best_count]
+    best = [signature for signature, count in counts.items() if count == best_count]
     if len(best) != 1:
-        raise ImageParseError("OCR 多次识别结果不一致，无法安全选择零件数据")
-    return best[0]
+        raise ImageParseError("零件图号在多次 OCR 中不一致，无法安全匹配模板")
+    selected_signature = best[0]
+    selected_candidates = [candidate for candidate in complete if tuple((part.index, part.drawing_no) for part in candidate) == selected_signature]
+    # 在图号一致的候选中优先使用出现次数最高的完整行；模板匹配仍是最终校验。
+    return Counter(selected_candidates).most_common(1)[0][0]
 
 
 def _parse_weight(text: str) -> float:
@@ -228,20 +234,24 @@ def parse_image(path: Path, original_filename: str | None = None) -> ImageData:
     filename = original_filename or path.name
     with Image.open(path) as image:
         _, height = image.size
-        title_top = _horizontal_rule_y(image) / height
+        try:
+            title_top = _horizontal_rule_y(image) / height
+        except ImageParseError:
+            # 标题栏不是业务校验字段；缺失时仍尝试从底部清单读取图号和重量。
+            title_top = 0.68
         # Scale 4 preserves the narrow T/1 strokes in short order codes better
         # than the heavier enlargement used for the surrounding title block.
         part_crop = _prepare_crop(image, (0.005, title_top + 0.008, 0.62, min(0.90, title_top + 0.18)), 4, 0)
         weight_crop = _prepare_crop(image, (0.840, title_top + 0.002, 0.995, min(0.86, title_top + 0.075)), 8, 0)
-        program_crop = _prepare_crop(image, (0.875, 0.90, 0.995, 0.995), 8, 0)
         bottom_crop = _prepare_crop(image, (0.00, title_top, 1.00, 1.00), 4)
         part_texts = _ocr_variants(part_crop, (6, 11)) + _ocr_variants(bottom_crop, (6,))
-        texts = part_texts + _ocr_variants(weight_crop, (6, 7, 11, 13)) + _ocr_variants(program_crop, (6, 7, 11))
+        texts = part_texts + _ocr_variants(weight_crop, (6, 7, 11, 13))
     ocr_text = "\n".join(texts)
     return ImageData(
         original_filename=filename,
         main_name=main_name_from_filename(filename),
-        program_no=_parse_program(ocr_text),
+        # 程序号只保留为展示信息，不参与是否可拆图的判定。
+        program_no=_parse_program(ocr_text) if re.search(r"\bN\s*[0-9ILSB]{2,}\b", ocr_text.upper()) else "",
         marked_weight_kg=_parse_weight(ocr_text),
         parts=_parse_parts_from_variants(part_texts),
         ocr_text=ocr_text,
