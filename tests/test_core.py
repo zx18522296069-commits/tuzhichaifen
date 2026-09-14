@@ -45,6 +45,16 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(_parse_weight("重量 14307.%ke"), 14307.96)
         self.assertEqual(_parse_program("代码文件名 NI84"), "N184")
 
+    def test_part_consensus_uses_drawing_number_not_auxiliary_ocr_noise(self) -> None:
+        from image_parser import _parse_parts_from_variants
+
+        variants = [
+            "1 ORDER-01 A-01 T40 2J P x 2\n2 ORDER-01 B-02 T40 1J W x 1",
+            "1 ORDER-01 A-01 T40 8J P x 2\n2 ORDER-01 B-02 T40 1J W x 1",
+        ]
+        parts = _parse_parts_from_variants(variants)
+        self.assertEqual([part.drawing_no for part in parts], ["A-01", "B-02"])
+
     def test_chinese_named_part_without_order_number(self) -> None:
         text = """
 1 YT71S-2000WA-0711 1007-01-02 T40 4J P x 2
