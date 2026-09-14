@@ -10,6 +10,7 @@ from excel_writer import validate_result, write_result
 from image_parser import _parse_parts, _parse_program, _parse_weight, main_name_from_filename, parse_image
 from matcher import MatchError, match_image, match_one
 from models import ImageData, ImagePart, SourcePart
+from pipeline import _failure_detail
 from source_reader import SourceReadError, read_summary_workbook
 
 
@@ -22,6 +23,16 @@ OCR_2323 = """
 
 
 class CoreTests(unittest.TestCase):
+    def test_match_failure_contains_file_fields_and_action(self) -> None:
+        stage, detail, suggestion = _failure_detail(
+            "#2329 T30.jpg",
+            MatchError("无唯一基础数据：订单=ABC，图号=1001-01，厚度=30，坡口=P，基础件数=2（找到 0 条）"),
+        )
+        self.assertEqual(stage, "基础数据严格匹配失败")
+        self.assertIn("#2329 T30.jpg", detail)
+        self.assertIn("订单=ABC", detail)
+        self.assertIn("订单号、图号、厚度、坡口和基础件数", suggestion)
+
     def test_2323_ocr_text(self) -> None:
         parts = _parse_parts(OCR_2323)
         self.assertEqual([part.drawing_no for part in parts], ["1001-01-08", "1001-01-17"])
