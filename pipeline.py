@@ -9,10 +9,10 @@ from pathlib import Path
 from config import Settings
 from drive_client import DriveClient, DriveError
 from excel_writer import validate_result, write_result
-from image_parser import ImageParseError, parse_image
+from image_parser import ImageParseError, parse_image, parse_images
 from matcher import MatchError, match_with_priority
 from models import SourcePart
-from pdf_renderer import PdfRenderError, render_single_page_pdf
+from pdf_renderer import PdfRenderError, render_pdf_pages
 from source_reader import SourceReadError, read_summary_workbook
 
 
@@ -42,7 +42,7 @@ def _failure_detail(filename: str, exc: Exception) -> tuple[str, str, str]:
         return (
             "PDF 图纸读取失败",
             f"文件={filename}；{raw}",
-            "确认该 PDF 为一张板材对应的一页完整图纸，且可正常打开；不要把多张板材合在同一个 PDF 后重新执行。",
+            "确认该 PDF 可正常打开；系统会逐页处理，请重点检查该页图号、重量和页面内容是否清晰。",
         )
     if isinstance(exc, ImageParseError):
         return (
@@ -154,13 +154,12 @@ def run_drive(
                 local_input = temp_dir / "inputs" / f"{item['id']}{suffix}"
                 drive.download(item["id"], local_input)
                 if item.get("mimeType") == PDF_MIME_TYPE:
-                    local_image = render_single_page_pdf(
-                        local_input,
-                        temp_dir / "rendered" / f"{item['id']}.png",
+                    rendered_pages = render_pdf_pages(
+                        local_input, temp_dir / "rendered" / item["id"]
                     )
+                    image = parse_images(rendered_pages, original_filename=filename)
                 else:
-                    local_image = local_input
-                image = parse_image(local_image, original_filename=filename)
+                    image = parse_image(local_input, original_filename=filename)
                 matches = match_with_priority(image, primary_parts, fallback_parts)
                 result_path = output_dir / f"{image.main_name}_完成.xlsx"
                 write_result(result_path, image, matches)
