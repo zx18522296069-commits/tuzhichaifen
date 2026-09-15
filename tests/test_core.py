@@ -9,7 +9,7 @@ from openpyxl import Workbook, load_workbook
 from excel_writer import validate_result, write_result
 from image_parser import _parse_parts, _parse_program, _parse_weight, main_name_from_filename, parse_image
 from matcher import MatchError, match_image, match_one
-from pdf_renderer import render_pdf_pages
+from pdf_renderer import extract_pdf_text_pages, render_pdf_pages
 from models import ImageData, ImagePart, SourcePart
 from pipeline import _failure_detail
 from source_reader import SourceReadError, read_summary_workbook
@@ -24,6 +24,23 @@ OCR_2323 = """
 
 
 class CoreTests(unittest.TestCase):
+    def test_fastnest_pdf_text_keeps_weight_and_compact_last_part_row(self) -> None:
+        text = """
+重量 22608.91kg
+零件索引
+1 YT71S-2000WA-0711 1004-01-03 T100 2J W x 2
+2 YT71S-2000AB-0711 1004-01-22 T100 1J W x 1
+3 YT71S-4500-0718 0501-04 T100 4J P x 4
+4 YT71S-4500-0718 0501-03.1 T100 8J P x 4
+5 YT71S-4500-0718 0501-02.2 T100 2J P x 2
+6YT71S-4500-07180501-02.1T1002JPx2
+"""
+        parts = _parse_parts(text)
+        self.assertEqual([part.index for part in parts], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(parts[-1].order_no, "YT71S-4500-0718")
+        self.assertEqual(parts[-1].drawing_no, "0501-02.1")
+        self.assertEqual(_parse_weight(text), 22608.91)
+
     def test_multi_page_pdf_is_rendered_for_ocr_as_one_input(self) -> None:
         import fitz
         from PIL import Image
@@ -37,6 +54,10 @@ class CoreTests(unittest.TestCase):
             document.new_page(width=595, height=842)
             document.save(pdf_path)
             document.close()
+
+            native_text = extract_pdf_text_pages(pdf_path)
+            self.assertEqual(len(native_text), 2)
+            self.assertIn("#2260 TEST", native_text[0])
 
             rendered = render_pdf_pages(pdf_path, temp_dir / "rendered")
             self.assertEqual(len(rendered), 2)
