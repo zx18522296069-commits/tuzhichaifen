@@ -16,10 +16,10 @@ from source_reader import read_summary_workbook
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="FastCAM 拆图结果云端自动生成")
-    parser.add_argument("--dry-run", action="store_true", help="完整读取与生成，但不写回 Drive、不改图片名")
-    parser.add_argument("--only", help="只处理文件名中包含该文本的图片")
+    parser.add_argument("--dry-run", action="store_true", help="完整读取与生成，但不写回 Drive、不改待拆文件名")
+    parser.add_argument("--only", help="只处理文件名中包含该文本的待拆图片或 PDF")
     parser.add_argument("--output-dir", type=Path, default=Path("output"))
-    parser.add_argument("--local-image", type=Path, help="本地单图回归测试")
+    parser.add_argument("--local-image", type=Path, help="本地单图回归测试（兼容旧参数）")
     parser.add_argument("--local-summary", type=Path, help="本地汇总表回归测试")
     parser.add_argument("--original-filename", help="本地测试时使用的原始图片名")
     return parser.parse_args()
@@ -73,4 +73,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
