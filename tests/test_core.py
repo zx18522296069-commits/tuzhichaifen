@@ -9,7 +9,7 @@ from openpyxl import Workbook, load_workbook
 from excel_writer import validate_result, write_result
 from image_parser import _parse_parts, _parse_program, _parse_weight, main_name_from_filename, parse_image
 from matcher import MatchError, match_image, match_one
-from pdf_renderer import PdfRenderError, render_single_page_pdf
+from pdf_renderer import render_pdf_pages
 from models import ImageData, ImagePart, SourcePart
 from pipeline import _failure_detail
 from source_reader import SourceReadError, read_summary_workbook
@@ -24,39 +24,25 @@ OCR_2323 = """
 
 
 class CoreTests(unittest.TestCase):
-    def test_single_page_pdf_is_rendered_for_ocr(self) -> None:
+    def test_multi_page_pdf_is_rendered_for_ocr_as_one_input(self) -> None:
         import fitz
         from PIL import Image
 
         with tempfile.TemporaryDirectory() as temp_name:
             temp_dir = Path(temp_name)
             pdf_path = temp_dir / "#2260.pdf"
-            output = temp_dir / "rendered.png"
             document = fitz.open()
             page = document.new_page(width=595, height=842)
             page.insert_text((72, 72), "#2260 TEST", fontsize=24)
+            document.new_page(width=595, height=842)
             document.save(pdf_path)
             document.close()
 
-            rendered = render_single_page_pdf(pdf_path, output)
-            self.assertEqual(rendered, output)
-            with Image.open(rendered) as image:
+            rendered = render_pdf_pages(pdf_path, temp_dir / "rendered")
+            self.assertEqual(len(rendered), 2)
+            with Image.open(rendered[0]) as image:
                 self.assertGreaterEqual(image.width, 3000)
                 self.assertGreaterEqual(image.height, 4000)
-
-    def test_multi_page_pdf_is_rejected_without_guessing_board(self) -> None:
-        import fitz
-
-        with tempfile.TemporaryDirectory() as temp_name:
-            temp_dir = Path(temp_name)
-            pdf_path = temp_dir / "#2260.pdf"
-            document = fitz.open()
-            document.new_page()
-            document.new_page()
-            document.save(pdf_path)
-            document.close()
-            with self.assertRaisesRegex(PdfRenderError, "共 2 页"):
-                render_single_page_pdf(pdf_path, temp_dir / "rendered.png")
     def test_match_failure_contains_file_fields_and_action(self) -> None:
         stage, detail, suggestion = _failure_detail(
             "#2329 T30.jpg",
