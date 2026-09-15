@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
@@ -254,6 +255,35 @@ class CoreTests(unittest.TestCase):
             workbook.save(path)
             parts = read_summary_workbook(path, "王振海/正在加工/177")
             self.assertEqual(parts[0].total_weight_kg, 3536.0)
+
+    def test_summary_reader_uses_semantic_fields_without_sheet_dimension(self) -> None:
+        """A production xlsm may omit its dimension record in read-only mode."""
+        with tempfile.TemporaryDirectory() as name:
+            path = Path(name) / "任意文件名.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "任意工作表名"
+            sheet.append(["型号", "零件图号", "板厚(mm)", "数量(件)", "坡口形式", "重量"])
+            sheet.append(["05TD1", "05TD1-01", 60, 2, "P", 2.084])
+            workbook.save(path)
+
+            # Remove the optional <dimension> element, matching the xlsm
+            # export that previously made openpyxl report max_row=None.
+            rewritten = Path(name) / "无行数信息.xlsx"
+            with zipfile.ZipFile(path) as source, zipfile.ZipFile(rewritten, "w") as target:
+                for item in source.infolist():
+                    data = source.read(item.filename)
+                    if item.filename == "xl/worksheets/sheet1.xml":
+                        data = data.replace(b'<dimension ref="A1:F2"/>', b"")
+                    target.writestr(item, data)
+
+            parts = read_summary_workbook(rewritten, "王振海/正在加工/订单")
+            self.assertEqual(len(parts), 1)
+            self.assertEqual(parts[0].order_no, "05TD1")
+            self.assertEqual(parts[0].drawing_no, "05TD1-01")
+            self.assertEqual(parts[0].thickness, 60.0)
+            self.assertEqual(parts[0].base_quantity, 2)
+            self.assertEqual(parts[0].total_weight_kg, 2084.0)
 
     def test_unlabelled_structured_bevel_column(self) -> None:
         with tempfile.TemporaryDirectory() as name:
