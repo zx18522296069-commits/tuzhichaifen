@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import zipfile
+import re
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
@@ -265,6 +266,7 @@ class CoreTests(unittest.TestCase):
             sheet.title = "任意工作表名"
             sheet.append(["型号", "零件图号", "板厚(mm)", "数量(件)", "坡口形式", "重量"])
             sheet.append(["05TD1", "05TD1-01", 60, 2, "P", 2.084])
+            sheet.append(["以下为空白或说明行"])
             workbook.save(path)
 
             # Remove the optional <dimension> element, matching the xlsm
@@ -274,7 +276,7 @@ class CoreTests(unittest.TestCase):
                 for item in source.infolist():
                     data = source.read(item.filename)
                     if item.filename == "xl/worksheets/sheet1.xml":
-                        data = data.replace(b'<dimension ref="A1:F2"/>', b"")
+                        data = re.sub(br"<dimension[^>]*/>", b"", data, count=1)
                     target.writestr(item, data)
 
             parts = read_summary_workbook(rewritten, "王振海/正在加工/订单")
