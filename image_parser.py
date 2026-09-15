@@ -42,6 +42,19 @@ _UNNAMED_PART_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Some FastNEST PDF writers emit the last row as one continuous text object,
+# e.g. ``6YT71S-4500-07180501-02.1T1002JPx2``.  It is still a normal part
+# row: the order ends with its four-digit suffix and the drawing begins with
+# the following four-digit drawing group.
+_COMPACT_PART_RE = re.compile(
+    r"^\s*(?P<index>\d+)\s*"
+    r"(?P<order>[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{4})"
+    r"(?P<drawing>\d{4}-\d{2}(?:\.\d+)?)"
+    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)"
+    r"(?P<base_quantity>\d+)J\s*(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
+    re.IGNORECASE,
+)
+
 
 def _prepare_crop(
     image: Image.Image,
@@ -111,7 +124,7 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
     found: dict[int, Counter[ImagePart]] = {}
     for raw_line in text.splitlines():
         line = re.sub(r"\s+", " ", raw_line.upper().replace("—", "-").replace("–", "-")).strip()
-        match = _PART_RE.search(line)
+        match = _PART_RE.search(line) or _COMPACT_PART_RE.search(line)
         if match:
             part = ImagePart(
                 index=int(match.group("index")),
@@ -268,13 +281,27 @@ def _merge_page_parts(page_parts: list[tuple[ImagePart, ...]]) -> tuple[ImagePar
     return tuple(selected)
 
 
-def parse_images(paths: list[Path], original_filename: str | None = None) -> ImageData:
+def parse_images(
+    paths: list[Path],
+    original_filename: str | None = None,
+    native_page_texts: list[str] | None = None,
+) -> ImageData:
     if not paths:
         raise ImageParseError("没有可识别的图片页面")
     filename = original_filename or paths[0].name
     all_part_texts: list[str] = []
     all_texts: list[str] = []
     page_parts: list[tuple[ImagePart, ...]] = []
+    # PDF selectable text is authoritative for its part list and marked
+    # weight.  Rendered-page OCR remains a fallback for scanned PDFs.
+    for native_text in native_page_texts or []:
+        all_part_texts.append(native_text)
+        all_texts.append(native_text)
+        try:
+            page_parts.append(_parse_parts(native_text))
+        except ImageParseError:
+            pass
+
     for path in paths:
         part_texts, texts = _ocr_page(path)
         all_part_texts.extend(part_texts)
