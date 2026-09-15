@@ -7,6 +7,28 @@ class PdfRenderError(ValueError):
     """PDF cannot safely be used as one FastCAM split-drawing input."""
 
 
+def extract_pdf_text_pages(path: Path) -> list[str]:
+    """Read the embedded FastNEST text before falling back to OCR.
+
+    FastNEST PDFs normally contain selectable text.  That text preserves the
+    part list and the marked plate weight far more reliably than OCR, even
+    when a page has a busy nesting drawing.
+    """
+    try:
+        import fitz  # PyMuPDF
+        document = fitz.open(path)
+    except Exception as exc:
+        raise PdfRenderError(f"PDF 无法打开：{exc}") from exc
+
+    try:
+        pages = [document.load_page(index).get_text("text") for index in range(document.page_count)]
+        if not pages:
+            raise PdfRenderError("PDF 不含可识别页面")
+        return pages
+    finally:
+        document.close()
+
+
 def render_pdf_pages(path: Path, output_dir: Path, dpi: int = 400) -> list[Path]:
     """Render every PDF page to a lossless PNG for the existing OCR pipeline."""
     try:
