@@ -230,8 +230,7 @@ def main_name_from_filename(filename: str) -> str:
     return tokens[0]
 
 
-def parse_image(path: Path, original_filename: str | None = None) -> ImageData:
-    filename = original_filename or path.name
+def _ocr_page(path: Path) -> tuple[list[str], list[str]]:
     with Image.open(path) as image:
         _, height = image.size
         try:
@@ -246,13 +245,57 @@ def parse_image(path: Path, original_filename: str | None = None) -> ImageData:
         bottom_crop = _prepare_crop(image, (0.00, title_top, 1.00, 1.00), 4)
         part_texts = _ocr_variants(part_crop, (6, 11)) + _ocr_variants(bottom_crop, (6,))
         texts = part_texts + _ocr_variants(weight_crop, (6, 7, 11, 13))
-    ocr_text = "\n".join(texts)
+    return part_texts, texts
+
+
+def _merge_page_parts(page_parts: list[tuple[ImagePart, ...]]) -> tuple[ImagePart, ...]:
+    candidates: dict[int, Counter[ImagePart]] = {}
+    for parts in page_parts:
+        for part in parts:
+            candidates.setdefault(part.index, Counter())[part] += 1
+    if not candidates:
+        raise ImageParseError("PDF 各页均未能识别出连续的零件索引")
+    selected: list[ImagePart] = []
+    for index, options in sorted(candidates.items()):
+        highest = max(options.values())
+        best = [part for part, count in options.items() if count == highest]
+        if len(best) != 1:
+            raise ImageParseError(f"跨页零件序号 {index} 存在无法消除的 OCR 冲突：{best}")
+        selected.append(best[0])
+    expected = list(range(1, len(selected) + 1))
+    if [part.index for part in selected] != expected:
+        raise ImageParseError(f"跨页零件序号不连续：{[part.index for part in selected]}")
+    return tuple(selected)
+
+
+def parse_images(paths: list[Path], original_filename: str | None = None) -> ImageData:
+    if not paths:
+        raise ImageParseError("没有可识别的图片页面")
+    filename = original_filename or paths[0].name
+    all_part_texts: list[str] = []
+    all_texts: list[str] = []
+    page_parts: list[tuple[ImagePart, ...]] = []
+    for path in paths:
+        part_texts, texts = _ocr_page(path)
+        all_part_texts.extend(part_texts)
+        all_texts.extend(texts)
+        try:
+            page_parts.append(_parse_parts_from_variants(part_texts))
+        except ImageParseError:
+            # A PDF may include drawing-only pages.  The final merged result
+            # remains strict: it must contain one continuous, unambiguous list.
+            continue
+    ocr_text = "\n".join(all_texts)
     return ImageData(
         original_filename=filename,
         main_name=main_name_from_filename(filename),
         # 程序号只保留为展示信息，不参与是否可拆图的判定。
         program_no=_parse_program(ocr_text) if re.search(r"\bN\s*[0-9ILSB]{2,}\b", ocr_text.upper()) else "",
         marked_weight_kg=_parse_weight(ocr_text),
-        parts=_parse_parts_from_variants(part_texts),
+        parts=_merge_page_parts(page_parts),
         ocr_text=ocr_text,
     )
+
+
+def parse_image(path: Path, original_filename: str | None = None) -> ImageData:
+    return parse_images([path], original_filename)
