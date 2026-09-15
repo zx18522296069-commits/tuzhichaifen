@@ -56,6 +56,11 @@ def _header_key(value: object) -> str:
     return ""
 
 
+def _row_value(row: tuple[object, ...], column: int) -> object:
+    """Return an empty value for sparse trailing rows in production sheets."""
+    return row[column - 1].value if column <= len(row) else None
+
+
 def read_summary_workbook(path: Path, source_path: str) -> list[SourcePart]:
     keep_vba = path.suffix.lower() == ".xlsm"
     formula_wb = load_workbook(path, data_only=False, read_only=True, keep_vba=keep_vba)
@@ -116,9 +121,9 @@ def read_summary_workbook(path: Path, source_path: str) -> list[SourcePart]:
         for candidate in range(quantity_col + 1, weight_col):
             values: list[str] = []
             for row in value_ws.iter_rows(min_row=header_row + 1):
-                if not _normal(row[drawing_col - 1].value):
+                if not _normal(_row_value(row, drawing_col)):
                     continue
-                value = _normal(row[candidate - 1].value)
+                value = _normal(_row_value(row, candidate))
                 if value:
                     values.append(value)
             if values and all(re.fullmatch(r"[A-Z][A-Z0-9]{0,3}", value) for value in values):
@@ -128,17 +133,17 @@ def read_summary_workbook(path: Path, source_path: str) -> list[SourcePart]:
         bevel_col = candidates[0]
     result: list[SourcePart] = []
     for row_no, row in enumerate(value_ws.iter_rows(min_row=header_row + 1), start=header_row + 1):
-        drawing = _normal(row[drawing_col - 1].value)
+        drawing = _normal(_row_value(row, drawing_col))
         if not drawing:
             continue
         try:
-            order = _order_number(row[order_col - 1].value)
-            thickness = float(row[thickness_col - 1].value)
-            quantity = int(row[quantity_col - 1].value)
+            order = _order_number(_row_value(row, order_col))
+            thickness = float(_row_value(row, thickness_col))
+            quantity = int(_row_value(row, quantity_col))
         except (TypeError, ValueError, SourceReadError):
             continue
-        bevel = _normal(row[bevel_col - 1].value)
-        cached_weight = row[weight_col - 1].value
+        bevel = _normal(_row_value(row, bevel_col))
+        cached_weight = _row_value(row, weight_col)
         if isinstance(cached_weight, (int, float)):
             total_weight_kg = float(cached_weight) * weight_multiplier
         else:
