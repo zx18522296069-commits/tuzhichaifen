@@ -12,11 +12,14 @@ from excel_writer import validate_result, write_result
 from image_parser import ImageParseError, parse_image
 from matcher import MatchError, match_with_priority
 from models import SourcePart
+from pdf_renderer import PdfRenderError, render_single_page_pdf
 from source_reader import SourceReadError, read_summary_workbook
 
 
 LOGGER = logging.getLogger("tuzhichaifen")
 IMAGE_MIME_TYPES = {"image/jpeg", "image/png"}
+PDF_MIME_TYPE = "application/pdf"
+SUPPORTED_INPUT_MIME_TYPES = IMAGE_MIME_TYPES | {PDF_MIME_TYPE}
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 XLSM_MIME = "application/vnd.ms-excel.sheet.macroenabled.12"
 WORKBOOK_MIME_TYPES = {XLSX_MIME, XLSM_MIME}
@@ -35,6 +38,12 @@ class RunItem:
 def _failure_detail(filename: str, exc: Exception) -> tuple[str, str, str]:
     """把技术异常转成前端和日志中可直接处理的中文说明。"""
     raw = str(exc).strip() or exc.__class__.__name__
+    if isinstance(exc, PdfRenderError):
+        return (
+            "PDF 图纸读取失败",
+            f"文件={filename}；{raw}",
+            "确认该 PDF 为一张板材对应的一页完整图纸，且可正常打开；不要把多张板材合在同一个 PDF 后重新执行。",
+        )
     if isinstance(exc, ImageParseError):
         return (
             "图片识别失败",
@@ -119,12 +128,14 @@ def run_drive(
     candidates = [
         item
         for item in drive.list_children(pending["id"])
-        if item.get("mimeType") in IMAGE_MIME_TYPES
+        if item.get("mimeType") in SUPPORTED_INPUT_MIME_TYPES
         and not item.get("name", "").startswith(settings.completed_prefix)
         and not Path(item.get("name", "")).stem.endswith("_完成")
         and (not only or only in item.get("name", ""))
     ]
-    LOGGER.info("扫描到 %d 张未完成图片", len(candidates))
+    # Keep the existing count prefix so the result panel can read historical
+    # and current runs alike.  The accepted inputs are now images and PDFs.
+    LOGGER.info("扫描到 %d 张未完成图片/PDF", len(candidates))
     if not candidates:
         return []
 
@@ -140,8 +151,15 @@ def run_drive(
             filename = item["name"]
             try:
                 suffix = Path(filename).suffix.lower() or ".jpg"
-                local_image = temp_dir / "images" / f"{item['id']}{suffix}"
-                drive.download(item["id"], local_image)
+                local_input = temp_dir / "inputs" / f"{item['id']}{suffix}"
+                drive.download(item["id"], local_input)
+                if item.get("mimeType") == PDF_MIME_TYPE:
+                    local_image = render_single_page_pdf(
+                        local_input,
+                        temp_dir / "rendered" / f"{item['id']}.png",
+                    )
+                else:
+                    local_image = local_input
                 image = parse_image(local_image, original_filename=filename)
                 matches = match_with_priority(image, primary_parts, fallback_parts)
                 result_path = output_dir / f"{image.main_name}_完成.xlsx"
