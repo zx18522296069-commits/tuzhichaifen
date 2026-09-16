@@ -5,6 +5,13 @@ on:
     paths:
       - 'tools/historical_regression.py'
       - 'image_parser.py'
+      - 'pipeline.py'
+      - 'matcher.py'
+      - 'source_reader.py'
+      - 'source_cache.py'
+      - 'pdf_renderer.py'
+      - 'excel_writer.py'
+      - 'models.py'
       - '.github/workflows/historical_regression.yml'
 
 permissions:
