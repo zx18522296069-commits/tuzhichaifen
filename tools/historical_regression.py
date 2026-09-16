@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from openpyxl import load_workbook
 from config import Settings
 from drive_client import DriveClient
 from excel_writer import validate_result, write_result
-from image_parser import parse_image
+from image_parser import ImageParseError, _ocr_page, _parse_parts_from_variants, parse_image
 from matcher import match_with_priority
 from pdf_renderer import extract_pdf_text_pages
 from pipeline import PDF_MIME_TYPE, _load_channel, _parse_pdf_by_page
@@ -60,6 +61,34 @@ def _compare(generated: Path, existing: Path, expected_rows: int) -> list[str]:
     return problems
 
 
+def _image_debug(path: Path) -> dict[str, object]:
+    """只输出数量和数字候选，避免把整张生产图 OCR 文本写进公开 CI 日志。"""
+    try:
+        part_texts, texts = _ocr_page(path)
+        recognized_parts = None
+        try:
+            recognized_parts = len(_parse_parts_from_variants(part_texts))
+        except ImageParseError:
+            pass
+        tokens: list[str] = []
+        for text in texts:
+            for token in re.findall(r"(?<!\d)\d{2,7}(?:[.,%]\d{1,3})?(?!\d)", text):
+                normalized = token.replace(",", ".")
+                if normalized not in tokens:
+                    tokens.append(normalized)
+                if len(tokens) >= 20:
+                    break
+            if len(tokens) >= 20:
+                break
+        return {
+            "part_ocr_variants": len(part_texts),
+            "recognized_parts": recognized_parts,
+            "numeric_candidates": tokens,
+        }
+    except Exception as exc:
+        return {"debug_error": f"{type(exc).__name__}: {exc}"}
+
+
 def main() -> None:
     settings = Settings.from_env()
     drive = DriveClient()
@@ -89,61 +118,73 @@ def main() -> None:
             original_name = source_name[len(settings.completed_prefix):] if source_name.startswith(settings.completed_prefix) else source_name
             suffix = Path(source_name).suffix.lower()
             local_input = root / "inputs" / source_name
-            drive.download(item["id"], local_input)
-            page_count = 1
-            ocr_pages: list[int] = []
-            route = "image-ocr"
+            case: dict[str, object] = {
+                "source": source_name,
+                "type": suffix.lstrip("."),
+                "pages": None,
+                "route": "image-ocr" if suffix != ".pdf" else None,
+                "ocr_pages": [],
+            }
+            try:
+                drive.download(item["id"], local_input)
+                page_count = 1
+                ocr_pages: list[int] = []
 
-            if item.get("mimeType") == PDF_MIME_TYPE or suffix == ".pdf":
-                with fitz.open(local_input) as document:
-                    page_count = document.page_count
-                page_texts = extract_pdf_text_pages(local_input)
-                image, ocr_pages = _parse_pdf_by_page(
-                    original_name,
-                    local_input,
-                    page_texts,
-                    root / "rendered" / item["id"],
-                )
-                route = "pdf-native" if not ocr_pages else "pdf-pagewise-ocr"
-            else:
-                image = parse_image(local_input, original_filename=original_name)
+                if item.get("mimeType") == PDF_MIME_TYPE or suffix == ".pdf":
+                    with fitz.open(local_input) as document:
+                        page_count = document.page_count
+                    page_texts = extract_pdf_text_pages(local_input)
+                    image, ocr_pages = _parse_pdf_by_page(
+                        original_name,
+                        local_input,
+                        page_texts,
+                        root / "rendered" / item["id"],
+                    )
+                    route = "pdf-native" if not ocr_pages else "pdf-pagewise-ocr"
+                else:
+                    image = parse_image(local_input, original_filename=original_name)
+                    route = "image-ocr"
 
-            matches = match_with_priority(image, primary_parts, fallback_parts)
-            generated = root / "generated" / f"{image.main_name}_完成.xlsx"
-            write_result(generated, image, matches)
-            validate_result(generated, expected_rows=len(matches))
+                case["pages"] = page_count
+                case["route"] = route
+                case["ocr_pages"] = ocr_pages
+                case["parts"] = len(image.parts)
+                case["program"] = image.program_no
+                case["marked_weight_kg"] = image.marked_weight_kg
 
-            result_name = generated.name
-            existing_matches = result_items.get(result_name, [])
-            if len(existing_matches) != 1:
-                failures.append(f"{source_name}: 历史结果 {result_name} 应唯一，实际 {len(existing_matches)} 个")
-                continue
-            existing = root / "existing" / result_name
-            drive.download(existing_matches[0]["id"], existing)
-            differences = _compare(generated, existing, len(matches))
-            if differences:
-                failures.append(f"{source_name}: " + "；".join(differences[:8]))
+                matches = match_with_priority(image, primary_parts, fallback_parts)
+                generated = root / "generated" / f"{image.main_name}_完成.xlsx"
+                write_result(generated, image, matches)
+                validate_result(generated, expected_rows=len(matches))
 
-            report.append(
-                {
-                    "source": source_name,
-                    "type": suffix.lstrip("."),
-                    "pages": page_count,
-                    "route": route,
-                    "ocr_pages": ocr_pages,
-                    "parts": len(image.parts),
-                    "program": image.program_no,
-                    "marked_weight_kg": image.marked_weight_kg,
-                    "output": result_name,
-                    "historical_compare": "PASS" if not differences else "FAIL",
-                    "differences": differences,
-                }
-            )
+                result_name = generated.name
+                case["output"] = result_name
+                existing_matches = result_items.get(result_name, [])
+                if len(existing_matches) != 1:
+                    raise RuntimeError(f"历史结果 {result_name} 应唯一，实际 {len(existing_matches)} 个")
+                existing = root / "existing" / result_name
+                drive.download(existing_matches[0]["id"], existing)
+                differences = _compare(generated, existing, len(matches))
+                case["differences"] = differences
+                case["historical_compare"] = "PASS" if not differences else "FAIL"
+                if differences:
+                    failures.append(f"{source_name}: " + "；".join(differences[:8]))
+            except Exception as exc:
+                case["historical_compare"] = "ERROR"
+                case["error"] = f"{type(exc).__name__}: {exc}"
+                if suffix in {".jpg", ".jpeg", ".png"} and local_input.exists():
+                    case["image_debug"] = _image_debug(local_input)
+                failures.append(f"{source_name}: {type(exc).__name__}: {exc}")
 
-    print("HISTORICAL_REGRESSION_REPORT=" + json.dumps(report, ensure_ascii=False))
-    print(f"HISTORICAL_REGRESSION_SUMMARY=total:{len(report)},pass:{sum(1 for item in report if item['historical_compare']=='PASS')},fail:{len(failures)}")
+            report.append(case)
+            print("HISTORICAL_CASE=" + json.dumps(case, ensure_ascii=False), flush=True)
+
+    pass_count = sum(1 for item in report if item.get("historical_compare") == "PASS")
+    fail_count = sum(1 for item in report if item.get("historical_compare") in {"FAIL", "ERROR"})
+    print("HISTORICAL_REGRESSION_REPORT=" + json.dumps(report, ensure_ascii=False), flush=True)
+    print(f"HISTORICAL_REGRESSION_SUMMARY=total:{len(report)},pass:{pass_count},fail:{fail_count}", flush=True)
     if failures:
-        print("HISTORICAL_REGRESSION_FAILURES=" + json.dumps(failures, ensure_ascii=False))
+        print("HISTORICAL_REGRESSION_FAILURES=" + json.dumps(failures, ensure_ascii=False), flush=True)
         raise SystemExit(1)
 
 
