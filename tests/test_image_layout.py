@@ -36,6 +36,26 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertEqual([part.index for part in parts], [1, 2, 3, 4])
         self.assertEqual(parts[-1].drawing_no, "1001-03-12")
 
+    def test_glued_thickness_quantity_and_confirmed_lifting_ear_alias(self) -> None:
+        # 真实 #2333 会出现 T604J / T601J 这类粘连，且“吊耳”稳定有一组 OCR 为“帅耳”。
+        # 当同长度候选里一组丢了图号、一组识别到已确认别名时，应选择信息更完整的候选。
+        incomplete = (
+            "1 JYT27-1600E-0910 1001-02-02 T602JPx2\n"
+            "2 HE T60100JPx13\n"
+            "3 JYT27-1600E-0910 1001-02-07 T601JWx1"
+        )
+        identified = (
+            "1 JYT27-1600E-0910 1001-02-02 T602JPx2\n"
+            "2 帅耳 T60100JPx13\n"
+            "3 JYT27-1600E-0910 1001-02-07 T601JWx1"
+        )
+        parts = _parse_parts_from_variants([incomplete, identified])
+        self.assertEqual([part.index for part in parts], [1, 2, 3])
+        self.assertEqual(parts[0].thickness, 60)
+        self.assertEqual(parts[0].base_quantity, 2)
+        self.assertEqual(parts[1].drawing_no, "吊耳")
+        self.assertEqual(parts[1].base_quantity, 100)
+
 
 if __name__ == "__main__":
     unittest.main()
