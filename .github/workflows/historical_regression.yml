@@ -46,4 +46,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 运行历史成品只读回归
-        run: python tools/historical_regression.py
+        run: PYTHONPATH=. python tools/historical_regression.py
