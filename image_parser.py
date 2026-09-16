@@ -19,7 +19,9 @@ class ImageParseError(RuntimeError):
 _PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+"
     r"(?P<order>[A-Z0-9]+(?:-[A-Z0-9]+)*)\s+"
-    r"(?P<drawing>[A-Z0-9.]+(?:-[A-Z0-9.]+)+[A-Z]?)\s+"
+    # 图号既可能是 1001-01-08 / 0501-03.1，也可能是 2310 这类不带连字符的短号。
+    # 对不带连字符的形式要求至少 2 个字符且至少包含 1 个数字，避免把单个 OCR 噪声字母当图号。
+    r"(?P<drawing>(?:[A-Z0-9.]+(?:-[A-Z0-9.]+)+[A-Z]?|(?=[A-Z0-9.]*\d)[A-Z0-9.]{2,}))\s+"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
