@@ -1,0 +1,49 @@
+name: 历史拆图只读回归
+
+on:
+  push:
+    paths:
+      - 'tools/historical_regression.py'
+      - '.github/workflows/historical_regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  historical-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      DRIVE_ROOT_FOLDER_ID: '1zM-DIWR_7ruB-41G7VETmVmCnKqB2WqM'
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 恢复基础数据缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: .source_cache
+          key: split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-${{ github.run_id }}
+          restore-keys: |
+            split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-
+
+      - name: 安装 OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-chi-sim
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 运行历史成品只读回归
+        run: python tools/historical_regression.py
