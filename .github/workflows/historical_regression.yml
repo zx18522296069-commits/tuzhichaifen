@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'tools/historical_regression.py'
+      - 'image_parser.py'
       - '.github/workflows/historical_regression.yml'
 
 permissions:
@@ -47,3 +48,10 @@ jobs:
 
       - name: 运行历史成品只读回归
         run: PYTHONPATH=. python tools/historical_regression.py
+
+      - name: 保存基础数据缓存
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .source_cache
+          key: split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-${{ github.run_id }}
