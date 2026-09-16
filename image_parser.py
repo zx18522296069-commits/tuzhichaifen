@@ -22,8 +22,10 @@ _PART_RE = re.compile(
     # 图号既可能是 1001-01-08 / 0501-03.1，也可能是 2310 这类不带连字符的短号。
     # 对不带连字符的形式要求至少 2 个字符且至少包含 1 个数字，避免把单个 OCR 噪声字母当图号。
     r"(?P<drawing>(?:[A-Z0-9.]+(?:-[A-Z0-9.]+)+[A-Z]?|(?=[A-Z0-9.]*\d)[A-Z0-9.]{2,}))\s+"
-    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
-    r"(?P<base_quantity>\d+)\S*?\s+"
+    # FastCAM 小字 OCR 常把 T60 4J / T60 1J 粘成 T604J / T601J。
+    # 以 J 作为基础件数结束标记，因此允许厚度与件数之间无空格，仍不会把 604 当厚度。
+    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s*"
+    r"(?P<base_quantity>\d+)\s*J\s*"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
     re.IGNORECASE,
 )
@@ -31,18 +33,22 @@ _PART_RE = re.compile(
 _NAMED_PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+"
     r"(?P<drawing>[\u3400-\u9fff](?:\s*[\u3400-\u9fff])*)\s*"
-    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
-    r"(?P<base_quantity>\d+)\S*?\s+"
+    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s*"
+    r"(?P<base_quantity>\d+)\s*J\s*"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
     re.IGNORECASE,
 )
 
 _UNNAMED_PART_RE = re.compile(
-    r"^\s*(?P<index>\d+)\s+.*?\s*T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
-    r"(?P<base_quantity>\d+)\S*?\s+"
+    r"^\s*(?P<index>\d+)\s+.*?\s*T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s*"
+    r"(?P<base_quantity>\d+)\s*J\s*"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
     re.IGNORECASE,
 )
+
+# 真实 #2333 中“吊耳”在一组稳定中文 OCR 中被识别成“帅耳”。
+# 只保留经过真实样本确认的精确别名；最终仍必须通过基础表唯一匹配。
+_DRAWING_OCR_ALIASES = {"帅耳": "吊耳"}
 
 # Some FastNEST PDF writers emit the last row as one continuous text object,
 # e.g. ``6YT71S-4500-07180501-02.1T1002JPx2``.  It is still a normal part
@@ -142,10 +148,12 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
         else:
             named_match = _NAMED_PART_RE.search(line)
             if named_match:
+                drawing_no = re.sub(r"\s+", "", named_match.group("drawing")).upper()
+                drawing_no = _DRAWING_OCR_ALIASES.get(drawing_no, drawing_no)
                 part = ImagePart(
                     index=int(named_match.group("index")),
                     order_no="",
-                    drawing_no=re.sub(r"\s+", "", named_match.group("drawing")).upper(),
+                    drawing_no=drawing_no,
                     thickness=float(named_match.group("thickness").replace(",", ".")),
                     base_quantity=int(named_match.group("base_quantity")),
                     bevel=named_match.group("bevel").upper(),
@@ -198,6 +206,14 @@ def _parse_parts_from_variants(texts: list[str]) -> tuple[ImagePart, ...]:
     # 核验；不能因 OCR 对这些辅助字段偶发抖动而丢弃一张图。
     longest = max(len(candidate) for candidate in candidates)
     complete = [candidate for candidate in candidates if len(candidate) == longest]
+    # 同样长度时，优先保留识别出更多图号的候选；空图号只是 OCR 兜底，
+    # 不应凭出现次数压过包含明确图号的候选。明确图号仍要经模板唯一匹配验证。
+    most_identified = max(sum(bool(part.drawing_no) for part in candidate) for candidate in complete)
+    complete = [
+        candidate
+        for candidate in complete
+        if sum(bool(part.drawing_no) for part in candidate) == most_identified
+    ]
     signatures = [tuple((part.index, part.drawing_no) for part in candidate) for candidate in complete]
     counts = Counter(signatures)
     best_count = max(counts.values())
