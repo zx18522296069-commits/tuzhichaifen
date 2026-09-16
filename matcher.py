@@ -16,10 +16,34 @@ def _same_number(left: float, right: float) -> bool:
     return abs(left - right) < 1e-9
 
 
+def _named_source_alias(image: ImagePart, source: SourcePart) -> bool:
+    """Map confirmed FastCAM display names to their exact source master keys.
+
+    Production history confirmed that the named row ``吊耳 / T60 / 100J / P``
+    is the BHDR master part ``1000-02``.  Keep this intentionally narrow: the
+    alias applies only to that exact physical signature and the BHDR order
+    family.  All normal matching and final uniqueness checks remain unchanged.
+    """
+    if image.order_no or image.drawing_no != "吊耳":
+        return False
+    if not (
+        _same_number(image.thickness, 60.0)
+        and image.base_quantity == 100
+        and image.bevel == "P"
+    ):
+        return False
+    return (
+        (source.order_no == "BHDR" or source.order_no.startswith("BHDR-"))
+        and source.drawing_no == "1000-02"
+    )
+
+
 def _same_drawing(image: ImagePart, source: SourcePart) -> bool:
     if not image.drawing_no:
         return True
     if source.drawing_no == image.drawing_no:
+        return True
+    if _named_source_alias(image, source):
         return True
     # 同一订单的旧模板有时把订单号重复写进图号，而排版图只显示图号后缀。
     # 这里只接受带连字符边界的完整后缀；后续候选数量仍必须严格等于 1。
