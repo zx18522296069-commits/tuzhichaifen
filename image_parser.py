@@ -22,10 +22,8 @@ _PART_RE = re.compile(
     # 图号既可能是 1001-01-08 / 0501-03.1，也可能是 2310 这类不带连字符的短号。
     # 对不带连字符的形式要求至少 2 个字符且至少包含 1 个数字，避免把单个 OCR 噪声字母当图号。
     r"(?P<drawing>(?:[A-Z0-9.]+(?:-[A-Z0-9.]+)+[A-Z]?|(?=[A-Z0-9.]*\d)[A-Z0-9.]{2,}))\s+"
-    # FastCAM 小字 OCR 常把 T60 4J / T60 1J 粘成 T604J / T601J。
-    # 以 J 作为基础件数结束标记，因此允许厚度与件数之间无空格，仍不会把 604 当厚度。
-    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s*"
-    r"(?P<base_quantity>\d+)\s*J\s*"
+    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
+    r"(?P<base_quantity>\d+)\S*?\s+"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
     re.IGNORECASE,
 )
@@ -33,15 +31,15 @@ _PART_RE = re.compile(
 _NAMED_PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+"
     r"(?P<drawing>[\u3400-\u9fff](?:\s*[\u3400-\u9fff])*)\s*"
-    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s*"
-    r"(?P<base_quantity>\d+)\s*J\s*"
+    r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
+    r"(?P<base_quantity>\d+)\S*?\s+"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
     re.IGNORECASE,
 )
 
 _UNNAMED_PART_RE = re.compile(
-    r"^\s*(?P<index>\d+)\s+.*?\s*T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s*"
-    r"(?P<base_quantity>\d+)\s*J\s*"
+    r"^\s*(?P<index>\d+)\s+.*?\s*T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
+    r"(?P<base_quantity>\d+)\S*?\s+"
     r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
     re.IGNORECASE,
 )
@@ -62,6 +60,29 @@ _COMPACT_PART_RE = re.compile(
     r"(?P<base_quantity>\d+)J\s*(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
     re.IGNORECASE,
 )
+
+_GLUE_T_QTY_RE = re.compile(r"\bT\s*(?P<digits>\d{2,6})\s*J(?=\s*[A-Z])", re.IGNORECASE)
+
+
+def _normalize_glued_thickness_quantity(line: str) -> str:
+    """Expand OCR forms such as T604J / T60100J without guessing normal spaced rows."""
+
+    def replace(match: re.Match[str]) -> str:
+        digits = match.group("digits")
+        # 从最长厚度前缀开始尝试。件数不接受前导 0，厚度只接受生产钢板的安全范围；
+        # 因此 60100 唯一拆成 60 + 100，604 唯一拆成 60 + 4。
+        for split in range(len(digits) - 1, 0, -1):
+            thickness_text = digits[:split]
+            quantity_text = digits[split:]
+            if len(quantity_text) > 1 and quantity_text.startswith("0"):
+                continue
+            thickness = int(thickness_text)
+            quantity = int(quantity_text)
+            if 1 <= thickness <= 500 and 1 <= quantity <= 10000:
+                return f"T{thickness} {quantity}J "
+        return match.group(0)
+
+    return _GLUE_T_QTY_RE.sub(replace, line)
 
 
 def _prepare_crop(
@@ -134,7 +155,11 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
     found: dict[int, Counter[ImagePart]] = {}
     for raw_line in text.splitlines():
         line = re.sub(r"\s+", " ", raw_line.upper().replace("—", "-").replace("–", "-")).strip()
-        match = _PART_RE.search(line) or _COMPACT_PART_RE.search(line)
+        # 保留旧 FastNEST 连续文本规则优先；普通 FastCAM 行再做已确认的 T+件数粘连归一。
+        compact_match = _COMPACT_PART_RE.search(line)
+        if compact_match is None:
+            line = _normalize_glued_thickness_quantity(line)
+        match = _PART_RE.search(line) or compact_match
         if match:
             part = ImagePart(
                 index=int(match.group("index")),
