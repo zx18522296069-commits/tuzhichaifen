@@ -248,8 +248,21 @@ def main_name_from_filename(filename: str) -> str:
 
 
 def _combine_ocr_segments(first: list[str], second: list[str]) -> list[str]:
-    """Combine matching OCR variants from a FastCAM main list and its continuation."""
-    return [f"{left}\n{right}" for left, right in zip(first, second)]
+    """Cross-combine FastCAM main-list and continuation OCR candidates."""
+    combined: list[str] = []
+    seen: set[str] = set()
+    for left in first:
+        if not left.strip():
+            continue
+        for right in second:
+            if not right.strip():
+                continue
+            text = f"{left.rstrip()}\n{right.lstrip()}"
+            if text in seen:
+                continue
+            seen.add(text)
+            combined.append(text)
+    return combined
 
 
 def _ocr_page(path: Path) -> tuple[list[str], list[str]]:
@@ -265,7 +278,8 @@ def _ocr_page(path: Path) -> tuple[list[str], list[str]]:
         main_end = min(0.90, title_top + 0.18)
         part_crop = _prepare_crop(image, (0.005, title_top + 0.008, 0.62, main_end), 4, 0)
         # FastCAM 在零件较多时会把后续序号放到标题栏下方的续表区域。
-        # 续表单独 OCR 后，与同一预处理/PSM 的主表结果拼接，再做原有严格连续序号校验。
+        # 主表和续表的最佳 OCR 预处理可能不是同一组，因此交叉组合所有候选，
+        # 再沿用严格连续序号与图号一致性校验，避免因版式续表而漏图。
         continuation_crop = _prepare_crop(image, (0.005, main_end, 0.62, 1.00), 4, 0)
         weight_crop = _prepare_crop(image, (0.840, title_top + 0.002, 0.995, min(0.86, title_top + 0.075)), 8, 0)
         bottom_crop = _prepare_crop(image, (0.00, title_top, 1.00, 1.00), 4)
