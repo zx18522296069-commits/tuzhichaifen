@@ -17,20 +17,21 @@ class ImageLayoutTests(unittest.TestCase):
         draw.line((0, 690, 999, 690), fill=0, width=1)
         self.assertEqual(_horizontal_rule_y(image), 494)
 
-    def test_main_list_and_continuation_are_rejoined_before_strict_parse(self) -> None:
+    def test_main_list_and_continuation_are_cross_rejoined_before_strict_parse(self) -> None:
+        # 模拟真实 #2333：主表的最佳 OCR 出现在第一个候选，续表的最佳 OCR
+        # 出现在第二个候选。旧版 zip 一一对应时无法形成完整 1..4；交叉组合应能恢复。
         main = [
             "1 JYT27-1600E-0910 1001-02-01 T60 1J W x1\n"
             "2 JYT27-1600E-0910 1001-04-01 T60 2J W x2",
-            "1 JYT27-1600E-0910 1001-02-01 T60 1J W x1\n"
-            "2 JYT27-1600E-0910 1001-04-01 T60 2J W x2",
+            "OCR NOISE WITHOUT COMPLETE MAIN TABLE",
         ]
         continuation = [
-            "3 JYT27-1600E-0910 1001-04-05 T60 2J W x2\n"
-            "4 JYT27-1600E-0910 1001-03-12 T60 1J W x1",
+            "OCR NOISE WITHOUT COMPLETE CONTINUATION TABLE",
             "3 JYT27-1600E-0910 1001-04-05 T60 2J W x2\n"
             "4 JYT27-1600E-0910 1001-03-12 T60 1J W x1",
         ]
         combined = _combine_ocr_segments(main, continuation)
+        self.assertEqual(len(combined), 4)
         parts = _parse_parts_from_variants(combined)
         self.assertEqual([part.index for part in parts], [1, 2, 3, 4])
         self.assertEqual(parts[-1].drawing_no, "1001-03-12")
