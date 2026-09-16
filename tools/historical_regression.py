@@ -24,6 +24,8 @@ SAMPLES = [
     "完成_#2185 T80退0.pdf",
     "完成_#2334 T80退700X1650.pdf",
     "完成_#2326 T50退2230X4150.pdf",
+    # 已确认是真实 2 页生产 PDF，用于多页解析/合并回归。
+    "完成_#2330 T30退0.pdf",
     "完成_#2323 T150退400X1760.jpg",
     "完成_#2333 T60退0.jpg",
 ]
@@ -124,6 +126,7 @@ def main() -> None:
                 "pages": None,
                 "route": "image-ocr" if suffix != ".pdf" else None,
                 "ocr_pages": [],
+                "processing": "PENDING",
             }
             try:
                 drive.download(item["id"], local_input)
@@ -156,20 +159,26 @@ def main() -> None:
                 generated = root / "generated" / f"{image.main_name}_完成.xlsx"
                 write_result(generated, image, matches)
                 validate_result(generated, expected_rows=len(matches))
+                case["processing"] = "PASS"
 
                 result_name = generated.name
                 case["output"] = result_name
                 existing_matches = result_items.get(result_name, [])
-                if len(existing_matches) != 1:
+                if not existing_matches:
+                    # 缺少旧成品只能说明没有逐字段基准，不能把已经成功完成解析/匹配/生成的样本判失败。
+                    case["historical_compare"] = "NO_BASELINE"
+                elif len(existing_matches) != 1:
                     raise RuntimeError(f"历史结果 {result_name} 应唯一，实际 {len(existing_matches)} 个")
-                existing = root / "existing" / result_name
-                drive.download(existing_matches[0]["id"], existing)
-                differences = _compare(generated, existing, len(matches))
-                case["differences"] = differences
-                case["historical_compare"] = "PASS" if not differences else "FAIL"
-                if differences:
-                    failures.append(f"{source_name}: " + "；".join(differences[:8]))
+                else:
+                    existing = root / "existing" / result_name
+                    drive.download(existing_matches[0]["id"], existing)
+                    differences = _compare(generated, existing, len(matches))
+                    case["differences"] = differences
+                    case["historical_compare"] = "PASS" if not differences else "FAIL"
+                    if differences:
+                        failures.append(f"{source_name}: " + "；".join(differences[:8]))
             except Exception as exc:
+                case["processing"] = "ERROR"
                 case["historical_compare"] = "ERROR"
                 case["error"] = f"{type(exc).__name__}: {exc}"
                 if suffix in {".jpg", ".jpeg", ".png"} and local_input.exists():
@@ -179,10 +188,16 @@ def main() -> None:
             report.append(case)
             print("HISTORICAL_CASE=" + json.dumps(case, ensure_ascii=False), flush=True)
 
-    pass_count = sum(1 for item in report if item.get("historical_compare") == "PASS")
-    fail_count = sum(1 for item in report if item.get("historical_compare") in {"FAIL", "ERROR"})
+    processing_pass = sum(1 for item in report if item.get("processing") == "PASS")
+    baseline_pass = sum(1 for item in report if item.get("historical_compare") == "PASS")
+    no_baseline = sum(1 for item in report if item.get("historical_compare") == "NO_BASELINE")
+    fail_count = sum(1 for item in report if item.get("processing") == "ERROR" or item.get("historical_compare") == "FAIL")
     print("HISTORICAL_REGRESSION_REPORT=" + json.dumps(report, ensure_ascii=False), flush=True)
-    print(f"HISTORICAL_REGRESSION_SUMMARY=total:{len(report)},pass:{pass_count},fail:{fail_count}", flush=True)
+    print(
+        f"HISTORICAL_REGRESSION_SUMMARY=total:{len(report)},processing_pass:{processing_pass},"
+        f"baseline_pass:{baseline_pass},no_baseline:{no_baseline},fail:{fail_count}",
+        flush=True,
+    )
     if failures:
         print("HISTORICAL_REGRESSION_FAILURES=" + json.dumps(failures, ensure_ascii=False), flush=True)
         raise SystemExit(1)
