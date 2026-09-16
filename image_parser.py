@@ -247,6 +247,11 @@ def main_name_from_filename(filename: str) -> str:
     return tokens[0]
 
 
+def _combine_ocr_segments(first: list[str], second: list[str]) -> list[str]:
+    """Combine matching OCR variants from a FastCAM main list and its continuation."""
+    return [f"{left}\n{right}" for left, right in zip(first, second)]
+
+
 def _ocr_page(path: Path) -> tuple[list[str], list[str]]:
     with Image.open(path) as image:
         _, height = image.size
@@ -257,10 +262,18 @@ def _ocr_page(path: Path) -> tuple[list[str], list[str]]:
             title_top = 0.68
         # Scale 4 preserves the narrow T/1 strokes in short order codes better
         # than the heavier enlargement used for the surrounding title block.
-        part_crop = _prepare_crop(image, (0.005, title_top + 0.008, 0.62, min(0.90, title_top + 0.18)), 4, 0)
+        main_end = min(0.90, title_top + 0.18)
+        part_crop = _prepare_crop(image, (0.005, title_top + 0.008, 0.62, main_end), 4, 0)
+        # FastCAM 在零件较多时会把后续序号放到标题栏下方的续表区域。
+        # 续表单独 OCR 后，与同一预处理/PSM 的主表结果拼接，再做原有严格连续序号校验。
+        continuation_crop = _prepare_crop(image, (0.005, main_end, 0.62, 1.00), 4, 0)
         weight_crop = _prepare_crop(image, (0.840, title_top + 0.002, 0.995, min(0.86, title_top + 0.075)), 8, 0)
         bottom_crop = _prepare_crop(image, (0.00, title_top, 1.00, 1.00), 4)
-        part_texts = _ocr_variants(part_crop, (6, 11)) + _ocr_variants(bottom_crop, (6,))
+        main_texts = _ocr_variants(part_crop, (6, 11))
+        continuation_texts = _ocr_variants(continuation_crop, (6, 11))
+        combined_texts = _combine_ocr_segments(main_texts, continuation_texts)
+        bottom_texts = _ocr_variants(bottom_crop, (6,))
+        part_texts = combined_texts + main_texts + continuation_texts + bottom_texts
         texts = part_texts + _ocr_variants(weight_crop, (6, 7, 11, 13))
     return part_texts, texts
 
