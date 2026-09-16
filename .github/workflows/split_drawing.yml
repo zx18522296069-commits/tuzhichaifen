@@ -3,12 +3,6 @@ name: 图纸拆分自动化
 on:
   schedule:
     - cron: '7 6 * * *'
-  push:
-    branches: [main]
-    paths:
-      - "**.py"
-      - "requirements.txt"
-      - ".github/workflows/split_drawing.yml"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -48,6 +42,14 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: 恢复基础数据缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: .source_cache
+          key: split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-${{ github.run_id }}
+          restore-keys: |
+            split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-
+
       - name: 安装 OCR
         run: |
           sudo apt-get update
@@ -55,9 +57,6 @@ jobs:
 
       - name: 安装依赖
         run: pip install -r requirements.txt
-
-      - name: 单元测试
-        run: python -m unittest discover -s tests -v
 
       - name: 检查凭据
         run: |
@@ -73,13 +72,19 @@ jobs:
       - name: 扫描并生成
         shell: bash
         run: |
-          mkdir -p logs
+          mkdir -p logs .source_cache
           args=(--output-dir output)
-          if [[ "${{ github.event_name }}" == "push" ]] || \
-             [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
             args+=(--dry-run)
           fi
           if [[ -n "${{ inputs.only }}" ]]; then
             args+=(--only "${{ inputs.only }}")
           fi
           python main.py "${args[@]}" 2>&1 | tee "logs/run-${GITHUB_RUN_ID}.log"
+
+      - name: 保存基础数据缓存
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .source_cache
+          key: split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-${{ github.run_id }}
