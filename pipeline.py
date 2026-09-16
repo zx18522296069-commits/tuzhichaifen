@@ -22,7 +22,8 @@ from image_parser import (
 from matcher import MatchError, match_with_priority
 from models import ImageData, SourcePart
 from pdf_renderer import PdfRenderError, extract_pdf_text_pages, render_pdf_pages
-from source_reader import SourceReadError, read_summary_workbook
+from source_cache import load_channel_cached
+from source_reader import SourceReadError
 
 
 LOGGER = logging.getLogger("tuzhichaifen")
@@ -30,8 +31,6 @@ IMAGE_MIME_TYPES = {"image/jpeg", "image/png"}
 PDF_MIME_TYPE = "application/pdf"
 SUPPORTED_INPUT_MIME_TYPES = IMAGE_MIME_TYPES | {PDF_MIME_TYPE}
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-XLSM_MIME = "application/vnd.ms-excel.sheet.macroenabled.12"
-WORKBOOK_MIME_TYPES = {XLSX_MIME, XLSM_MIME}
 
 
 @dataclass
@@ -138,30 +137,7 @@ def _load_channel(
     channel_name: str,
     workdir: Path,
 ) -> list[SourcePart]:
-    source_parts: list[SourcePart] = []
-    for folder_item in drive.list_children(folder_id):
-        effective_id = drive.effective_folder_id(folder_item)
-        if not effective_id:
-            continue
-        workbooks = [
-            item
-            for item in drive.list_children(effective_id)
-            if item.get("mimeType") in WORKBOOK_MIME_TYPES
-            and ("汇总表" in item.get("name", "") or "模板" in item.get("name", ""))
-        ]
-        for item in workbooks:
-            local_path = workdir / channel_name / effective_id / item["name"]
-            drive.download(item["id"], local_path)
-            source_path = f"王振海/{channel_name}/{folder_item['name']}"
-            try:
-                source_parts.extend(read_summary_workbook(local_path, source_path))
-            except SourceReadError as exc:
-                # Source folders can contain legacy or auxiliary workbooks that
-                # happen to use a summary-like filename.  Keep scanning other
-                # orders; an image that depends on this file will still fail
-                # strict matching and will not be renamed.
-                LOGGER.warning("跳过不可读基础表：%s/%s：%s", source_path, item["name"], exc)
-    return source_parts
+    return load_channel_cached(drive, folder_id, channel_name, workdir)
 
 
 def run_drive(
