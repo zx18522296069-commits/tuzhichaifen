@@ -110,7 +110,9 @@ def _horizontal_rule_y(image: Image.Image) -> int:
     width, height = gray.size
     left, right = round(width * 0.02), round(width * 0.98)
     threshold = (right - left) * 0.80
-    for y in range(round(height * 0.50), round(height * 0.86)):
+    # 有些 FastCAM 图的标题栏顶边会落在图片高度约 49% 处。
+    # 从 40% 开始寻找首条横跨 80% 宽度的水平线，避免错过顶边后误抓标题栏底边。
+    for y in range(round(height * 0.40), round(height * 0.86)):
         dark = sum(pixel < 140 for pixel in gray.crop((left, y, right, y + 1)).getdata())
         if dark >= threshold:
             return y
