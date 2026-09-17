@@ -1,0 +1,97 @@
+name: 2336多页PDF真实回归
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.2336-real-test-trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  test2336:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: '1'
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      DRIVE_ROOT_FOLDER_ID: '1zM-DIWR_7ruB-41G7VETmVmCnKqB2WqM'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: 恢复基础数据缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: .source_cache
+          key: split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-${{ github.run_id }}
+          restore-keys: |
+            split-source-v1-${{ runner.os }}-${{ hashFiles('source_cache.py', 'source_reader.py', 'models.py') }}-
+      - run: pip install -r requirements.txt
+      - name: 用真实2336验证当前多页PDF流程
+        shell: bash
+        run: |
+          mkdir -p output
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from config import Settings
+          from drive_client import DriveClient
+          from pipeline import _parse_pdf_by_page, _load_channel
+          from pdf_renderer import extract_pdf_text_pages
+          from matcher import match_with_priority
+          from excel_writer import write_result, validate_result
+
+          FILE_ID = '1Hy58HYm9TgDxLgtGkYCnU3bOeTFXS-e_'
+          FILENAME = '#2336 T40退2220X2520.pdf'
+          settings = Settings.from_env()
+          drive = DriveClient()
+          processing = drive.find_child_folder(settings.root_folder_id, settings.processing_folder_name)
+          templates = drive.find_child_folder(settings.root_folder_id, settings.template_folder_name)
+
+          with TemporaryDirectory(prefix='2336-real-') as td:
+              work = Path(td)
+              pdf = work / '2336.pdf'
+              drive.download(FILE_ID, pdf)
+              page_texts = extract_pdf_text_pages(pdf)
+              print(f'2336_PAGE_COUNT={len(page_texts)}')
+              print('2336_PAGE_TEXT_LENGTHS=' + ','.join(str(len(x or '')) for x in page_texts))
+              image, ocr_pages = _parse_pdf_by_page(FILENAME, pdf, page_texts, work / 'rendered')
+              print(f'2336_OCR_PAGES={ocr_pages}')
+              print(f'2336_PROGRAM={image.program_no}')
+              print(f'2336_WEIGHT_KG={image.marked_weight_kg}')
+              print(f'2336_PART_COUNT={len(image.parts)}')
+              print(f'2336_INDEXES={[p.index for p in image.parts]}')
+              print(f'2336_SPLIT_QTY_TOTAL={sum(p.split_quantity for p in image.parts)}')
+              for p in image.parts:
+                  print(f'PART|{p.index}|{p.order_no}|{p.drawing_no}|T{p.thickness:g}|{p.base_quantity}J|{p.bevel}|x{p.split_quantity}')
+              assert len(page_texts) == 2, f'预期2页，实际{len(page_texts)}页'
+              assert [p.index for p in image.parts] == list(range(1, 18)), '跨页序号未完整得到1..17'
+              assert not ocr_pages, f'本文件两页都有原生文字，不应OCR，实际={ocr_pages}'
+
+              primary = _load_channel(drive, processing['id'], settings.processing_folder_name, work)
+              fallback = _load_channel(drive, templates['id'], settings.template_folder_name, work)
+              matches = match_with_priority(image, primary, fallback)
+              print(f'2336_MATCH_COUNT={len(matches)}')
+              assert len(matches) == 17
+              for m in matches:
+                  print(f'MATCH|{m.image.index}|{m.source.order_no}|{m.source.drawing_no}|{m.source.source_path}|{m.source.source_workbook}')
+
+              out = Path('output/#2336_完成_重测.xlsx')
+              write_result(out, image, matches)
+              validate_result(out, expected_rows=17)
+              print(f'2336_RESULT={out}')
+              print('2336_REAL_TEST=PASS')
+          PY
+      - name: 上传重测结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2336-real-retest
+          path: output/#2336_完成_重测.xlsx
+          if-no-files-found: error
