@@ -379,7 +379,7 @@ def run_drive(
     drive = DriveClient()
     pending = drive.find_child_folder(settings.root_folder_id, settings.pending_folder_name)
     processing = drive.find_child_folder(settings.root_folder_id, settings.processing_folder_name)
-    templates = drive.find_child_folder(settings.root_folder_id, settings.template_folder_name)
+    templates = drive.find_child_folder(settings.root_folder_id, settings.template_folder_name, required=False)
     results = drive.find_child_folder(settings.root_folder_id, settings.result_folder_name)
 
     candidates = [
@@ -399,7 +399,11 @@ def run_drive(
     with tempfile.TemporaryDirectory(prefix="tuzhichaifen-") as temp_name:
         temp_dir = Path(temp_name)
         primary_parts = _load_channel(drive, processing["id"], settings.processing_folder_name, temp_dir)
-        fallback_parts = _load_channel(drive, templates["id"], settings.template_folder_name, temp_dir)
+        if templates is None:
+            LOGGER.warning("未找到拆图模版目录；仅使用正在加工的基础数据继续处理")
+            fallback_parts = []
+        else:
+            fallback_parts = _load_channel(drive, templates["id"], settings.template_folder_name, temp_dir)
         LOGGER.info("基础数据：正在加工 %d 条，拆图模版 %d 条", len(primary_parts), len(fallback_parts))
 
         for item in candidates:
