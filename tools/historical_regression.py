@@ -96,7 +96,7 @@ def main() -> None:
     drive = DriveClient()
     pending = drive.find_child_folder(settings.root_folder_id, settings.pending_folder_name)
     processing = drive.find_child_folder(settings.root_folder_id, settings.processing_folder_name)
-    templates = drive.find_child_folder(settings.root_folder_id, settings.template_folder_name)
+    templates = drive.find_child_folder(settings.root_folder_id, settings.template_folder_name, required=False)
     results = drive.find_child_folder(settings.root_folder_id, settings.result_folder_name)
 
     pending_items = {item["name"]: item for item in drive.list_children(pending["id"])}
@@ -113,7 +113,10 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="historical-regression-") as temp_name:
         root = Path(temp_name)
         primary_parts = _load_channel(drive, processing["id"], settings.processing_folder_name, root / "sources")
-        fallback_parts = _load_channel(drive, templates["id"], settings.template_folder_name, root / "sources")
+        fallback_parts = (
+            _load_channel(drive, templates["id"], settings.template_folder_name, root / "sources")
+            if templates is not None else []
+        )
 
         for source_name in SAMPLES:
             item = pending_items[source_name]
