@@ -103,7 +103,7 @@ def _parse_pdf_page_parts(text: str, *, allow_gaps: bool = False) -> tuple[Image
                 drawing_no=match.group("drawing").upper(),
                 thickness=float(match.group("thickness").replace(",", ".")),
                 base_quantity=int(match.group("base_quantity")),
-                bevel=(match.group("bevel") or "W").upper(),
+                bevel=re.sub(r"\s+", "", (match.group("bevel") or "W").upper()),
                     bevel_unmarked=not bool(match.group("bevel")),
                 split_quantity=int(match.group("split_quantity")),
             )
@@ -116,7 +116,7 @@ def _parse_pdf_page_parts(text: str, *, allow_gaps: bool = False) -> tuple[Image
                     drawing_no=re.sub(r"\s+", "", named_match.group("drawing")).upper(),
                     thickness=float(named_match.group("thickness").replace(",", ".")),
                     base_quantity=int(named_match.group("base_quantity")),
-                    bevel=(named_match.group("bevel") or "W").upper(),
+                    bevel=re.sub(r"\s+", "", (named_match.group("bevel") or "W").upper()),
                     bevel_unmarked=not bool(named_match.group("bevel")),
                     split_quantity=int(named_match.group("split_quantity")),
                 )
@@ -130,7 +130,7 @@ def _parse_pdf_page_parts(text: str, *, allow_gaps: bool = False) -> tuple[Image
                     drawing_no="",
                     thickness=float(unnamed_match.group("thickness").replace(",", ".")),
                     base_quantity=int(unnamed_match.group("base_quantity")),
-                    bevel=(unnamed_match.group("bevel") or "W").upper(),
+                    bevel=re.sub(r"\s+", "", (unnamed_match.group("bevel") or "W").upper()),
                     bevel_unmarked=not bool(unnamed_match.group("bevel")),
                     split_quantity=int(unnamed_match.group("split_quantity")),
                 )
