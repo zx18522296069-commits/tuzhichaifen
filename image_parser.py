@@ -24,7 +24,7 @@ _PART_RE = re.compile(
     r"(?P<drawing>(?:[A-Z0-9.]+(?:-[A-Z0-9.]+)+[A-Z]?|(?=[A-Z0-9.]*\d)[A-Z0-9.]{2,}))\s+"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
-    r"(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
+    r"(?:(?P<bevel>P(?:\s*[A-Z0-9])*|[A-OQ-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
@@ -33,14 +33,14 @@ _NAMED_PART_RE = re.compile(
     r"(?P<drawing>[\u3400-\u9fff](?:\s*[\u3400-\u9fff])*)\s*"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
-    r"(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
+    r"(?:(?P<bevel>P(?:\s*[A-Z0-9])*|[A-OQ-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
 _UNNAMED_PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+.*?\s*T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
-    r"(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
+    r"(?:(?P<bevel>P(?:\s*[A-Z0-9])*|[A-OQ-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
@@ -57,7 +57,7 @@ _COMPACT_PART_RE = re.compile(
     r"(?P<order>[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{4})"
     r"(?P<drawing>\d{4}-\d{2}(?:\.\d+)?)"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)"
-    r"(?P<base_quantity>\d+)J\s*(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
+    r"(?P<base_quantity>\d+)J\s*(?:(?P<bevel>P(?:\s*[A-Z0-9])*|[A-OQ-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
@@ -167,7 +167,7 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
                 drawing_no=match.group("drawing").upper(),
                 thickness=float(match.group("thickness").replace(",", ".")),
                 base_quantity=int(match.group("base_quantity")),
-                bevel=(match.group("bevel") or "W").upper(),
+                bevel=re.sub(r"\s+", "", (match.group("bevel") or "W").upper()),
                     bevel_unmarked=not bool(match.group("bevel")),
                 split_quantity=int(match.group("split_quantity")),
             )
@@ -182,7 +182,7 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
                     drawing_no=drawing_no,
                     thickness=float(named_match.group("thickness").replace(",", ".")),
                     base_quantity=int(named_match.group("base_quantity")),
-                    bevel=(named_match.group("bevel") or "W").upper(),
+                    bevel=re.sub(r"\s+", "", (named_match.group("bevel") or "W").upper()),
                     bevel_unmarked=not bool(named_match.group("bevel")),
                     split_quantity=int(named_match.group("split_quantity")),
                 )
@@ -196,7 +196,7 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
                     drawing_no="",
                     thickness=float(unnamed_match.group("thickness").replace(",", ".")),
                     base_quantity=int(unnamed_match.group("base_quantity")),
-                    bevel=(unnamed_match.group("bevel") or "W").upper(),
+                    bevel=re.sub(r"\s+", "", (unnamed_match.group("bevel") or "W").upper()),
                     bevel_unmarked=not bool(unnamed_match.group("bevel")),
                     split_quantity=int(unnamed_match.group("split_quantity")),
                 )
