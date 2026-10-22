@@ -12,6 +12,7 @@ class ImagePart:
     base_quantity: int
     bevel: str
     split_quantity: int
+    bevel_unmarked: bool = False  # 未标注坡口归类W，但保留未标注状态
 
 
 @dataclass(frozen=True)

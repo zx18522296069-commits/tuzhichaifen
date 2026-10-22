@@ -19,6 +19,7 @@ from image_parser import (
     _UNNAMED_PART_RE,
     _ocr_page,
     _parse_parts,
+    _normalize_glued_thickness_quantity,
     _parse_program,
     _parse_weight,
     main_name_from_filename,
@@ -81,7 +82,7 @@ def _parse_pdf_native_text(filename: str, page_texts: list[str]) -> ImageData:
     )
 
 
-def _parse_pdf_page_parts(text: str) -> tuple[ImagePart, ...]:
+def _parse_pdf_page_parts(text: str, *, allow_gaps: bool = False) -> tuple[ImagePart, ...]:
     """Parse one PDF page without requiring its first index to be 1.
 
     A later PDF page may legitimately contain indexes 4,5,6.  The page itself
@@ -91,7 +92,10 @@ def _parse_pdf_page_parts(text: str) -> tuple[ImagePart, ...]:
     found: dict[int, Counter[ImagePart]] = {}
     for raw_line in text.splitlines():
         line = re.sub(r"\s+", " ", raw_line.upper().replace("—", "-").replace("–", "-")).strip()
-        match = _PART_RE.search(line) or _COMPACT_PART_RE.search(line)
+        compact_match = _COMPACT_PART_RE.search(line)
+        if compact_match is None:
+            line = _normalize_glued_thickness_quantity(line)
+        match = _PART_RE.search(line) or compact_match
         if match:
             part = ImagePart(
                 index=int(match.group("index")),
@@ -99,7 +103,8 @@ def _parse_pdf_page_parts(text: str) -> tuple[ImagePart, ...]:
                 drawing_no=match.group("drawing").upper(),
                 thickness=float(match.group("thickness").replace(",", ".")),
                 base_quantity=int(match.group("base_quantity")),
-                bevel=match.group("bevel").upper(),
+                bevel=(match.group("bevel") or "W").upper(),
+                    bevel_unmarked=not bool(match.group("bevel")),
                 split_quantity=int(match.group("split_quantity")),
             )
         else:
@@ -111,7 +116,8 @@ def _parse_pdf_page_parts(text: str) -> tuple[ImagePart, ...]:
                     drawing_no=re.sub(r"\s+", "", named_match.group("drawing")).upper(),
                     thickness=float(named_match.group("thickness").replace(",", ".")),
                     base_quantity=int(named_match.group("base_quantity")),
-                    bevel=named_match.group("bevel").upper(),
+                    bevel=(named_match.group("bevel") or "W").upper(),
+                    bevel_unmarked=not bool(named_match.group("bevel")),
                     split_quantity=int(named_match.group("split_quantity")),
                 )
             else:
@@ -124,7 +130,8 @@ def _parse_pdf_page_parts(text: str) -> tuple[ImagePart, ...]:
                     drawing_no="",
                     thickness=float(unnamed_match.group("thickness").replace(",", ".")),
                     base_quantity=int(unnamed_match.group("base_quantity")),
-                    bevel=unnamed_match.group("bevel").upper(),
+                    bevel=(unnamed_match.group("bevel") or "W").upper(),
+                    bevel_unmarked=not bool(unnamed_match.group("bevel")),
                     split_quantity=int(unnamed_match.group("split_quantity")),
                 )
         found.setdefault(part.index, Counter())[part] += 1
@@ -142,7 +149,7 @@ def _parse_pdf_page_parts(text: str) -> tuple[ImagePart, ...]:
 
     indexes = [part.index for part in selected]
     expected = list(range(indexes[0], indexes[-1] + 1))
-    if indexes != expected:
+    if not allow_gaps and indexes != expected:
         raise ImageParseError(f"本页零件序号不连续：{indexes}")
     return tuple(selected)
 
@@ -153,7 +160,7 @@ def _parse_pdf_page_ocr(path: Path) -> tuple[tuple[ImagePart, ...], str]:
     candidates: list[tuple[ImagePart, ...]] = []
     for text in part_texts:
         try:
-            candidates.append(_parse_pdf_page_parts(text))
+            candidates.append(_parse_pdf_page_parts(text, allow_gaps=True))
         except ImageParseError:
             continue
     if not candidates:
@@ -238,13 +245,60 @@ def _program_from_texts(texts: list[str]) -> str:
     return next(program for program in reversed(programs) if counts[program] == highest)
 
 
+def _pdf_candidate_indexes(text: str) -> set[int]:
+    """Find printed part indexes, including rows the structured parser missed."""
+    return {
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?m)^\s*(\d{1,4})\s+[^\r\n]{1,130}?\bT\s*\d+(?:[.,]\d+)?\s+\d+J\b",
+            text, re.IGNORECASE,
+        )
+    }
+
+
+def _merge_native_ocr_parts(
+    native: tuple[ImagePart, ...],
+    ocr: tuple[ImagePart, ...],
+    page_index: int,
+) -> tuple[ImagePart, ...]:
+    """OCR supplements native rows; it may never silently replace or delete them."""
+    found = {part.index: part for part in native}
+    for candidate in ocr:
+        prior = found.get(candidate.index)
+        if prior is None:
+            found[candidate.index] = candidate
+            continue
+        if prior == candidate:
+            continue
+        same_values = (
+            prior.thickness == candidate.thickness
+            and prior.base_quantity == candidate.base_quantity
+            and prior.split_quantity == candidate.split_quantity
+            and prior.bevel == candidate.bevel
+        )
+        compatible_labels = (
+            (not prior.order_no or not candidate.order_no or prior.order_no == candidate.order_no)
+            and (not prior.drawing_no or not candidate.drawing_no or prior.drawing_no == candidate.drawing_no)
+        )
+        if not same_values or not compatible_labels:
+            raise ImageParseError(
+                f"PDF 第 {page_index} 页原生文本与 OCR 零件序号 {candidate.index} 内容冲突："
+                f"原生={prior}；OCR={candidate}"
+            )
+        if prior.order_no and prior.drawing_no:
+            continue
+        if candidate.order_no or candidate.drawing_no:
+            found[candidate.index] = candidate
+    return tuple(found[index] for index in sorted(found))
+
+
 def _parse_pdf_by_page(
     filename: str,
     pdf_path: Path,
     page_texts: list[str],
     rendered_dir: Path,
 ) -> tuple[ImageData, list[int]]:
-    """Parse a PDF page-by-page, OCRing only pages whose native list is unusable."""
+    """Merge original PDF text with full-width OCR, validate 1..N across pages."""
     page_parts: list[tuple[ImagePart, ...]] = []
     native_texts: list[str] = []
     ocr_texts: list[str] = []
@@ -260,32 +314,46 @@ def _parse_pdf_by_page(
             if weight is not None:
                 native_weights.append(weight)
         try:
-            parts = _parse_pdf_page_parts(native_text)
-            page_parts.append(parts)
-            LOGGER.info("PDF 第 %d 页使用原生文本", page_index + 1)
-            continue
-        except ImageParseError as native_exc:
-            LOGGER.info("PDF 第 %d 页原生零件清单不足，单页 OCR 回退：%s", page_index + 1, native_exc)
+            native_parts = _parse_pdf_page_parts(native_text, allow_gaps=True)
+        except ImageParseError as exc:
+            native_parts = ()
+            LOGGER.info("PDF 第 %d 页原生清单不足：%s", page_index + 1, exc)
 
+        native_indices = [part.index for part in native_parts]
+        contiguous = bool(native_indices) and native_indices == list(
+            range(native_indices[0], native_indices[-1] + 1)
+        )
+        printed_indices = _pdf_candidate_indexes(native_text)
+        native_complete = contiguous and printed_indices.issubset(set(native_indices))
+        if native_complete:
+            page_parts.append(native_parts)
+            LOGGER.info("PDF 第 %d 页原生零件清单完整：%d 条", page_index + 1, len(native_parts))
+            continue
+
+        LOGGER.info(
+            "PDF 第 %d 页全宽双列 OCR 补漏：原生 %s，文字疑似序号 %s",
+            page_index + 1, native_indices, sorted(printed_indices),
+        )
         rendered = render_pdf_page(pdf_path, rendered_dir, page_index)
         ocr_pages.append(page_index + 1)
         try:
-            parts, ocr_text = _parse_pdf_page_ocr(rendered)
-            page_parts.append(parts)
+            ocr_parts, ocr_text = _parse_pdf_page_ocr(rendered)
+            merged = _merge_native_ocr_parts(native_parts, ocr_parts, page_index + 1)
+            page_parts.append(merged)
             ocr_texts.append(ocr_text)
             weight = _weight_if_present(ocr_text)
             if weight is not None:
                 ocr_weights.append(weight)
-            LOGGER.info("PDF 第 %d 页 OCR 解析成功", page_index + 1)
+            LOGGER.info(
+                "PDF 第 %d 页 OCR 合并：原生 %d、OCR %d、合计 %d",
+                page_index + 1, len(native_parts), len(ocr_parts), len(merged),
+            )
         except ImageParseError as ocr_exc:
-            # A text-based drawing-only continuation page may legitimately have
-            # no part list.  Empty/scanned pages are kept strict because there
-            # is no reliable evidence that a required list was not lost.
-            if native_text.strip() and not _has_part_list_hint(native_text):
-                LOGGER.info("PDF 第 %d 页判定为无零件清单的图形页，跳过", page_index + 1)
+            if not native_parts and native_text.strip() and not _has_part_list_hint(native_text):
+                LOGGER.info("PDF 第 %d 页无零件清单，跳过图形页", page_index + 1)
                 continue
             raise ImageParseError(
-                f"PDF 第 {page_index + 1} 页原生文本与 OCR 均无法安全读取零件清单：{ocr_exc}"
+                f"PDF 第 {page_index + 1} 页原生文字与 OCR 无法完整补齐零件：{ocr_exc}"
             ) from ocr_exc
 
     parts = _merge_pdf_page_parts(page_parts)
@@ -307,7 +375,6 @@ def _parse_pdf_by_page(
         ),
         ocr_pages,
     )
-
 
 def _failure_detail(filename: str, exc: Exception) -> tuple[str, str, str]:
     """把技术异常转成前端和日志中可直接处理的中文说明。"""
