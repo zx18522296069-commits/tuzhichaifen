@@ -24,7 +24,7 @@ _PART_RE = re.compile(
     r"(?P<drawing>(?:[A-Z0-9.]+(?:-[A-Z0-9.]+)+[A-Z]?|(?=[A-Z0-9.]*\d)[A-Z0-9.]{2,}))\s+"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
-    r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
+    r"(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
@@ -33,14 +33,14 @@ _NAMED_PART_RE = re.compile(
     r"(?P<drawing>[\u3400-\u9fff](?:\s*[\u3400-\u9fff])*)\s*"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
-    r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
+    r"(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
 _UNNAMED_PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s+.*?\s*T\s*(?P<thickness>\d+(?:[.,]\d+)?)\s+"
     r"(?P<base_quantity>\d+)\S*?\s+"
-    r"(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
+    r"(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
@@ -57,7 +57,7 @@ _COMPACT_PART_RE = re.compile(
     r"(?P<order>[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{4})"
     r"(?P<drawing>\d{4}-\d{2}(?:\.\d+)?)"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)"
-    r"(?P<base_quantity>\d+)J\s*(?P<bevel>[A-Z][A-Z0-9]*)\s*[X×]\s*(?P<split_quantity>\d+)\b",
+    r"(?P<base_quantity>\d+)J\s*(?:(?P<bevel>[A-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
     re.IGNORECASE,
 )
 
@@ -167,7 +167,8 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
                 drawing_no=match.group("drawing").upper(),
                 thickness=float(match.group("thickness").replace(",", ".")),
                 base_quantity=int(match.group("base_quantity")),
-                bevel=match.group("bevel").upper(),
+                bevel=(match.group("bevel") or "W").upper(),
+                    bevel_unmarked=not bool(match.group("bevel")),
                 split_quantity=int(match.group("split_quantity")),
             )
         else:
@@ -181,7 +182,8 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
                     drawing_no=drawing_no,
                     thickness=float(named_match.group("thickness").replace(",", ".")),
                     base_quantity=int(named_match.group("base_quantity")),
-                    bevel=named_match.group("bevel").upper(),
+                    bevel=(named_match.group("bevel") or "W").upper(),
+                    bevel_unmarked=not bool(named_match.group("bevel")),
                     split_quantity=int(named_match.group("split_quantity")),
                 )
             else:
@@ -194,7 +196,8 @@ def _parse_parts(text: str) -> tuple[ImagePart, ...]:
                     drawing_no="",
                     thickness=float(unnamed_match.group("thickness").replace(",", ".")),
                     base_quantity=int(unnamed_match.group("base_quantity")),
-                    bevel=unnamed_match.group("bevel").upper(),
+                    bevel=(unnamed_match.group("bevel") or "W").upper(),
+                    bevel_unmarked=not bool(unnamed_match.group("bevel")),
                     split_quantity=int(unnamed_match.group("split_quantity")),
                 )
         found.setdefault(part.index, Counter())[part] += 1
@@ -307,31 +310,35 @@ def _combine_ocr_segments(first: list[str], second: list[str]) -> list[str]:
 
 
 def _ocr_page(path: Path) -> tuple[list[str], list[str]]:
+    """OCR both columns and continuation areas, not just the left crop."""
     with Image.open(path) as image:
         _, height = image.size
         try:
             title_top = _horizontal_rule_y(image) / height
         except ImageParseError:
-            # 标题栏不是业务校验字段；缺失时仍尝试从底部清单读取图号和重量。
             title_top = 0.68
-        # Scale 4 preserves the narrow T/1 strokes in short order codes better
-        # than the heavier enlargement used for the surrounding title block.
         main_end = min(0.90, title_top + 0.18)
-        part_crop = _prepare_crop(image, (0.005, title_top + 0.008, 0.62, main_end), 4, 0)
-        # FastCAM 在零件较多时会把后续序号放到标题栏下方的续表区域。
-        # 主表和续表的最佳 OCR 预处理可能不是同一组，因此交叉组合所有候选，
-        # 再沿用严格连续序号与图号一致性校验，避免因版式续表而漏图。
-        continuation_crop = _prepare_crop(image, (0.005, main_end, 0.62, 1.00), 4, 0)
-        weight_crop = _prepare_crop(image, (0.840, title_top + 0.002, 0.995, min(0.86, title_top + 0.075)), 8, 0)
+        # FastNEST often prints 1..5 in the left column and 6..11 at right.
+        left_main = _prepare_crop(image, (0.005, title_top + 0.008, 0.56, main_end), 4, 0)
+        left_continue = _prepare_crop(image, (0.005, main_end, 0.56, 1.00), 4, 0)
+        right_main = _prepare_crop(image, (0.54, title_top + 0.008, 0.995, main_end), 4, 0)
+        right_continue = _prepare_crop(image, (0.54, main_end, 0.995, 1.00), 4, 0)
         bottom_crop = _prepare_crop(image, (0.00, title_top, 1.00, 1.00), 4)
-        main_texts = _ocr_variants(part_crop, (6, 11))
-        continuation_texts = _ocr_variants(continuation_crop, (6, 11))
-        combined_texts = _combine_ocr_segments(main_texts, continuation_texts)
-        bottom_texts = _ocr_variants(bottom_crop, (6,))
-        part_texts = combined_texts + main_texts + continuation_texts + bottom_texts
-        texts = part_texts + _ocr_variants(weight_crop, (6, 7, 11, 13))
-    return part_texts, texts
-
+        weight_crop = _prepare_crop(
+            image, (0.840, title_top + 0.002, 0.995, min(0.86, title_top + 0.075)), 8, 0
+        )
+        lm = _ocr_variants(left_main, (6, 11))
+        lc = _ocr_variants(left_continue, (6, 11))
+        rm = _ocr_variants(right_main, (6, 11))
+        rc = _ocr_variants(right_continue, (6, 11))
+        left_texts = _combine_ocr_segments(lm, lc) + lm + lc
+        right_texts = _combine_ocr_segments(rm, rc) + rm + rc
+        part_texts = (
+            _combine_ocr_segments(left_texts, right_texts)
+            + left_texts + right_texts + _ocr_variants(bottom_crop, (6,))
+        )
+        all_texts = part_texts + _ocr_variants(weight_crop, (6, 7, 11, 13))
+    return part_texts, all_texts
 
 def _merge_page_parts(page_parts: list[tuple[ImagePart, ...]]) -> tuple[ImagePart, ...]:
     candidates: dict[int, Counter[ImagePart]] = {}
