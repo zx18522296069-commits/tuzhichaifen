@@ -38,7 +38,7 @@ def write_result(path: Path, image: ImageData, matches: tuple[MatchedPart, ...])
     worksheet.set_column("G:G", 17)
     worksheet.set_column("H:H", 16)
     worksheet.set_column("I:I", 17)
-    worksheet.set_column("J:J", 3)
+    worksheet.set_column("J:J", 22)
     worksheet.set_column("K:K", 8)
     worksheet.set_column("L:L", 24)
     worksheet.set_column("M:M", 17)
@@ -80,6 +80,11 @@ def write_result(path: Path, image: ImageData, matches: tuple[MatchedPart, ...])
         {**base_font, "font_size": 9, "font_color": "#4B5563", "bg_color": "#F3F4F6", "text_wrap": True}
     )
 
+    unmarked_cell = workbook.add_format(
+        {**base_font, "bg_color": "#FFF0D6", "font_color": "#975000", "bold": True,
+         "align": "center", "valign": "vcenter", "border": 1}
+    )
+
     worksheet.set_row(0, 30)
     worksheet.merge_range("A1:I1", f"{image.main_name}_完成 拆图重量明细", title)
     worksheet.set_row(1, 24)
@@ -87,7 +92,7 @@ def write_result(path: Path, image: ImageData, matches: tuple[MatchedPart, ...])
     for column, value in enumerate(metadata):
         worksheet.write(1, column, value, meta)
 
-    headers = ["序号", "订单号", "图号", "厚度", "基础件数", "图片拆分数量", "基础表总重量（T）", "单件重量（T）", "本次拆分重量（KG）"]
+    headers = ["序号", "订单号", "图号", "厚度", "基础件数", "图片拆分数量", "基础表总重量（T）", "单件重量（T）", "本次拆分重量（KG）", "坡口标注"]
     worksheet.set_row(3, 28)
     worksheet.write_row(3, 0, headers, header)
     for offset, match in enumerate(matches):
@@ -103,6 +108,11 @@ def write_result(path: Path, image: ImageData, matches: tuple[MatchedPart, ...])
         worksheet.write_number(row, 6, match.total_weight_t, row_tonnes)
         worksheet.write_formula(row, 7, f"=G{excel_row}/E{excel_row}", row_tonnes, match.unit_weight_t)
         worksheet.write_formula(row, 8, f"=H{excel_row}*F{excel_row}*1000", row_kg, match.split_weight_kg)
+        worksheet.write(
+            row, 9,
+            "W（未标注坡口）" if match.image.bevel_unmarked else f"{match.image.bevel}（已标注）",
+            unmarked_cell if match.image.bevel_unmarked else row_text,
+        )
 
     first_data_row = 5
     last_data_row = 4 + len(matches)
