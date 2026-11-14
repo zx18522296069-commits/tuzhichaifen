@@ -1,11 +1,9 @@
-"""逐号核对拆图索引与原始汇总表，提供可追溯的字符级差异。
+"""逐号核对拆图索引与原始汇总表，按空格分隔的业务字段成段对照。
 
 所有猜测仅用于异常展示，绝不能当作成功匹配或写回依据。
 """
 
 from __future__ import annotations
-
-from difflib import SequenceMatcher
 
 from matcher import _same_drawing, find_candidates
 from models import ImageData, ImagePart, SourcePart
@@ -34,21 +32,6 @@ def _same_field(key: str, part: ImagePart, source: SourcePart) -> bool:
     return getattr(part, key) == getattr(source, key)
 
 
-def _character_diffs(actual: str, expected: str) -> list[dict]:
-    """1-based positions in the drawing/OCR string; deletion/insertion kept explicit."""
-    result = []
-    for tag, a, b, c, d in SequenceMatcher(None, actual, expected, autojunk=False).get_opcodes():
-        if tag == "equal":
-            continue
-        result.append({
-            "position": a + 1,
-            "actual": actual[a:b] or "（缺失）",
-            "expected": expected[c:d] or "（多出）",
-            "operation": {"replace": "替换", "insert": "缺字", "delete": "多字"}[tag],
-        })
-    return result
-
-
 def _source_ref(source: SourcePart) -> dict:
     return {
         "path": source.source_path,
@@ -68,7 +51,6 @@ def _difference(part: ImagePart, source: SourcePart) -> list[dict]:
             "label": label,
             "actual": actual or "（未识别）",
             "expected": expected or "（空值）",
-            "characters": _character_diffs(actual, expected) if actual else [],
         })
     return differences
 
