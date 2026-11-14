@@ -35,6 +35,7 @@ class SourcePart:
     total_weight_kg: float
     source_path: str
     source_workbook: str
+    row_number: int | None = None  # Excel 原始物理行号，供失败诊断定位
 
 
 @dataclass(frozen=True)
