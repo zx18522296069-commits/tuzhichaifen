@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from models import ImageData, ImagePart, SourcePart
+from pipeline import _partial_pdf_failure_diagnostics
 from split_diagnostics import inspect_split
 
 
@@ -63,6 +64,33 @@ class SplitDiagnosticTests(unittest.TestCase):
         self.assertIsNone(row["source"])
         self.assertEqual(len(row["alternatives"]), 2)
         self.assertEqual(row["differences"], [])
+
+
+    def test_partial_pdf_failure_identifies_missing_middle_index(self) -> None:
+        text = (
+            "1 THP34-400J 1004-01 T20 4J P1F x 2\n"
+            "2 THP34-400J 1004-02 T20 4J SOMETHING-UNREADABLE\n"
+            "3 THP34-400J 1004-03 T20 4J P1F x 2\n"
+        )
+        report = _partial_pdf_failure_diagnostics(
+            "#2488 T20.pdf", [text],
+            [self.source("1004-01", row=10), self.source("1004-03", row=12)],
+            [],
+        )
+        self.assertIsNotNone(report)
+        self.assertTrue(report["parse_incomplete"])
+        self.assertEqual([row["index"] for row in report["rows"]], [1, 2, 3])
+        self.assertEqual(report["rows"][1]["status"], "未识别")
+        self.assertIn("字段无法完整解析", report["rows"][1]["note"])
+        self.assertIsNone(report["rows"][1]["source"])
+
+    def test_unmatched_part_names_checked_order_workbook(self) -> None:
+        item = ImagePart(8, self.order, "UNKNOWN-99", 30, 7, "W", 1)
+        report = inspect_split(self.image((item,)), [self.source("1004-08", row=19)], [])
+        row = report["rows"][0]
+        self.assertEqual(row["status"], "待核对")
+        self.assertEqual(row["searched_workbooks"][0]["workbook"], self.book)
+        self.assertIn("汇总表", row["note"])
 
 
 if __name__ == "__main__":
