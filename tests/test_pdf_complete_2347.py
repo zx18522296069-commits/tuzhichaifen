@@ -72,7 +72,7 @@ class Pdf2347SafetyTests(unittest.TestCase):
         self.assertEqual([p.index for p in image.parts], [1, 2, 3])
         self.assertTrue(image.parts[0].bevel_unmarked)
 
-    def test_ocr_conflict_blocks_completion(self):
+    def test_ocr_noise_cannot_replace_complete_native_row(self):
         native = ("100.00kg\n1 ORDER-2026-0001 1001-01 T20 2J P x 2\n"
                   "3 ORDER-2026-0001 1001-03 T20 2J P x 1")
         candidates = (ImagePart(2, "ORDER-2026-0001", "1001-02", 20, 2, "P", 1),
@@ -81,8 +81,12 @@ class Pdf2347SafetyTests(unittest.TestCase):
             with patch("pipeline.render_pdf_page", return_value=Path(d) / "2.png"), patch(
                 "pipeline._parse_pdf_page_ocr", return_value=(candidates, "100.00kg")
             ):
-                with self.assertRaisesRegex(ImageParseError, "内容冲突"):
-                    _parse_pdf_by_page("#2347.pdf", Path(d) / "x.pdf", [native], Path(d) / "ocr")
+                image, ocr_pages = _parse_pdf_by_page(
+                    "#2347.pdf", Path(d) / "x.pdf", [native], Path(d) / "ocr"
+                )
+        self.assertEqual(ocr_pages, [1])
+        self.assertEqual([part.index for part in image.parts], [1, 2, 3])
+        self.assertEqual(image.parts[2].bevel, "P")
 
     def test_excel_warning_uses_existing_j_column(self):
         part = _parse_pdf_page_parts(PAGE1)[0]
