@@ -37,6 +37,31 @@ class PdfPagewiseTests(unittest.TestCase):
         self.assertEqual([part.index for part in image.parts], [1, 2, 3, 4])
         self.assertEqual(image.marked_weight_kg, 100.0)
 
+    def test_native_contiguous_but_missing_drawing_triggers_ocr(self) -> None:
+        # 以前该页序号 1、2 连续，系统就跳过 OCR；实际上第 1 号
+        # 只剩 T60/4J/W，图号完全没有读出来。
+        text = (
+            "100.00kg\n"
+            "1 T60 4J W x 4\n"
+            "2 ORDER-2026-0001 1001-02 T60 2J P x 2\n"
+        )
+        fixed = ImagePart(1, "ORDER-2026-0001", "1001-01", 60, 4, "W", 4)
+        with tempfile.TemporaryDirectory() as name:
+            image_path = Path(name) / "page.png"
+            with patch("pipeline.render_pdf_page", return_value=image_path) as render, patch(
+                "pipeline._parse_pdf_page_ocr", return_value=((fixed,), "")
+            ) as ocr:
+                image, pages = _parse_pdf_by_page(
+                    "#2384 T60退0.pdf", Path(name) / "source.pdf",
+                    [text], Path(name) / "rendered",
+                )
+        self.assertEqual(pages, [1])
+        self.assertEqual(image.parts[0].drawing_no, "1001-01")
+        self.assertEqual(image.parts[0].order_no, "ORDER-2026-0001")
+        self.assertEqual(image.parts[1].drawing_no, "1001-02")
+        render.assert_called_once()
+        ocr.assert_called_once_with(image_path)
+
     def test_only_failed_page_is_rendered_for_ocr(self) -> None:
         pages = [
             "重量 100.00kg\n1 ORDER-2026-0001 1001-01 T40 2J P x 1",
