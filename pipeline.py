@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -572,11 +573,30 @@ def run_drive(
                         "filename": filename, **row,
                     }, ensure_ascii=False, separators=(",", ":")))
                 if diagnostics["error_count"]:
-                    failed_indexes = [str(row["index"]) for row in diagnostics["rows"] if row["status"] != "通过"]
+                    failed_rows = [row for row in diagnostics["rows"] if row["status"] != "通过"]
+                    failed_indexes = [str(row["index"]) for row in failed_rows]
+                    # The existing public GitHub Pages result endpoint already
+                    # forwards the Chinese failure reason unchanged. Embed a
+                    # URL-safe, UTF-8 diagnostic record in that same message so
+                    # the original result table can show every failing part,
+                    # source workbook/row and complete conflicting field.
+                    # Do not rely on a separately deployed control API release.
+                    inline_payload = {
+                        "version": 1,
+                        "filename": filename,
+                        "checked_count": diagnostics["checked_count"],
+                        "ok_count": diagnostics["ok_count"],
+                        "error_count": diagnostics["error_count"],
+                        "rows": failed_rows,
+                    }
+                    inline_token = base64.urlsafe_b64encode(
+                        json.dumps(inline_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    ).decode("ascii").rstrip("=")
                     raise MatchError(
                         f"逐号核对 {diagnostics['checked_count']} 条，"
                         f"{diagnostics['error_count']} 条不一致或无法唯一确认；"
-                        f"问题序号：{','.join(failed_indexes)}；请在前端查看逐号差异"
+                        f"问题序号：{','.join(failed_indexes)}；"
+                        f"SPLIT_INLINE_B64:{inline_token}"
                     )
                 matches = match_with_priority(image, primary_parts, fallback_parts)
                 result_path = output_dir / f"{image.main_name}_完成.xlsx"
