@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import re
@@ -450,6 +449,62 @@ def _partial_pdf_failure_diagnostics(
     return report
 
 
+def _split_failure_text(rows: list[dict]) -> str:
+    """Human-readable per-part comparison, forwarded unchanged to GitHub Pages.
+
+    Never put base64, JSON or internal diagnostic markers in user-facing errors.
+    A near match remains a candidate, not a verified source row.
+    """
+    messages: list[str] = []
+    for row in rows:
+        index = row["index"]
+        diffs = row.get("differences") or []
+        source = row.get("source")
+        if diffs and source:
+            mismatches = "；".join(
+                f"{item['label']}：图纸 {item['actual']} / 汇总表 {item['expected']}"
+                for item in diffs
+            )
+            location = f"{source['source_path']}" if "source_path" in source else source.get("path", "")
+            location = location.rstrip("/")
+            messages.append(
+                f"【第{index}号：{mismatches}；对应汇总表 "
+                f"{location}/{source.get('workbook', '未确认')}"
+                f"第{source.get('row') or '?'}行（疑似对应，请核对）】"
+            )
+        elif row.get("alternatives"):
+            actual = row.get("actual") or {}
+            drawing = actual.get("drawing_no") or "未识别"
+            order = actual.get("order_no") or "未识别"
+            candidates = row["alternatives"]
+            count = row.get("candidate_count", len(candidates))
+            sources = "、".join(
+                f"{item.get('workbook', '未知汇总表')}第{item.get('row') or '?'}行"
+                f"（图号{item.get('drawing_no', '未知')}）"
+                for item in candidates[:3]
+            )
+            suffix = f"等{count}条" if count > 3 else ""
+            messages.append(
+                f"【第{index}号：图纸订单 {order}，图号 {drawing}；"
+                f"无法唯一匹配，候选汇总表：{sources}{suffix}】"
+            )
+        else:
+            actual = row.get("actual") or {}
+            known = "，".join(
+                f"{label}{actual.get(key) or '未识别'}"
+                for key, label in (
+                    ("order_no", "订单"), ("drawing_no", "图号"),
+                    ("thickness", "T"), ("bevel", "坡口"),
+                    ("base_quantity", "基础件数"),
+                )
+            )
+            workbooks = row.get("searched_workbooks") or []
+            checked = "、".join(item.get("workbook", "") for item in workbooks[:3])
+            result = f"已查询汇总表 {checked}，但未找到对应行" if checked else "未找到可确认的对应汇总表"
+            messages.append(f"【第{index}号：图纸{known}；{result}】")
+    return "；".join(messages)
+
+
 def _failure_detail(filename: str, exc: Exception) -> tuple[str, str, str]:
     """把技术异常转成前端和日志中可直接处理的中文说明。"""
     raw = str(exc).strip() or exc.__class__.__name__
@@ -583,53 +638,11 @@ def run_drive(
                 if diagnostics["error_count"]:
                     failed_rows = [row for row in diagnostics["rows"] if row["status"] != "通过"]
                     failed_indexes = [str(row["index"]) for row in failed_rows]
-                    # The existing public GitHub Pages result endpoint already
-                    # forwards the Chinese failure reason unchanged. Embed a
-                    # URL-safe, UTF-8 diagnostic record in that same message so
-                    # the original result table can show every failing part,
-                    # source workbook/row and complete conflicting field.
-                    # Do not rely on a separately deployed control API release.
-                    # A large nesting board may have dozens of failing
-                    # indexes that share the same candidate source rows.
-                    # Deduplicate the source references to keep the single
-                    # GitHub Actions error line below GitHub's line limit.
-                    source_catalog: list[dict] = []
-                    source_keys: dict[str, int] = {}
-
-                    def source_id(source: dict | None) -> int | None:
-                        if source is None:
-                            return None
-                        key = json.dumps(source, ensure_ascii=False, sort_keys=True)
-                        if key not in source_keys:
-                            source_keys[key] = len(source_catalog)
-                            source_catalog.append(source)
-                        return source_keys[key]
-
-                    compact_rows: list[dict] = []
-                    for failed_row in failed_rows:
-                        compact = dict(failed_row)
-                        compact["source"] = source_id(failed_row.get("source"))
-                        compact["alternatives"] = [
-                            source_id(source) for source in failed_row.get("alternatives", [])
-                        ]
-                        compact_rows.append(compact)
-                    inline_payload = {
-                        "version": 2,
-                        "filename": filename,
-                        "checked_count": diagnostics["checked_count"],
-                        "ok_count": diagnostics["ok_count"],
-                        "error_count": diagnostics["error_count"],
-                        "sources": source_catalog,
-                        "rows": compact_rows,
-                    }
-                    inline_token = base64.urlsafe_b64encode(
-                        json.dumps(inline_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-                    ).decode("ascii").rstrip("=")
+                    detail_text = _split_failure_text(failed_rows)
                     raise MatchError(
                         f"逐号核对 {diagnostics['checked_count']} 条，"
                         f"{diagnostics['error_count']} 条不一致或无法唯一确认；"
-                        f"问题序号：{','.join(failed_indexes)}；"
-                        f"SPLIT_INLINE_B64:{inline_token}"
+                        f"问题序号：{','.join(failed_indexes)}；{detail_text}"
                     )
                 matches = match_with_priority(image, primary_parts, fallback_parts)
                 result_path = output_dir / f"{image.main_name}_完成.xlsx"
