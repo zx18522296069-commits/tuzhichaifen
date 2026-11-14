@@ -327,7 +327,15 @@ def _parse_pdf_by_page(
             range(native_indices[0], native_indices[-1] + 1)
         )
         printed_indices = _pdf_candidate_indexes(native_text)
-        native_complete = contiguous and printed_indices.issubset(set(native_indices))
+        # 一页即使序号 1..N 连续，只要有零件图号没提取出来，
+        # 也不能视为文字读取完整；强制用该页全宽 OCR 补回身份字段。
+        # 避免仅凭 T厚度/件数/坡口误认为已与订单汇总表核对成功。
+        identifiers_complete = all(part.drawing_no for part in native_parts)
+        native_complete = (
+            contiguous
+            and printed_indices.issubset(set(native_indices))
+            and identifiers_complete
+        )
         if native_complete:
             page_parts.append(native_parts)
             LOGGER.info("PDF 第 %d 页原生零件清单完整：%d 条", page_index + 1, len(native_parts))
