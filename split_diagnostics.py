@@ -37,6 +37,11 @@ def _source_ref(source: SourcePart) -> dict:
         "path": source.source_path,
         "workbook": source.source_workbook,
         "row": source.row_number,
+        "order_no": source.order_no,
+        "drawing_no": source.drawing_no,
+        "thickness": _value(source.thickness),
+        "bevel": source.bevel,
+        "base_quantity": source.base_quantity,
     }
 
 
@@ -101,6 +106,7 @@ def inspect_split(image: ImageData, primary: list[SourcePart], fallback: list[So
             "source": None,
             "differences": [],
             "alternatives": [],
+            "searched_workbooks": [],
             "note": "",
         }
         primary_exact = find_candidates(part, primary)
@@ -135,7 +141,23 @@ def inspect_split(image: ImageData, primary: list[SourcePart], fallback: list[So
             base["note"] = "存在多个同样接近的汇总表记录，无法确定哪一行正确"
             base["alternatives"] = [_source_ref(source) for source in alternatives]
         else:
-            base["note"] = "没有足够证据定位对应汇总表行，不能推断哪个字符有误"
+            # Even when no row is close enough, tell the operator which
+            # authoritative order workbooks were actually searched.
+            same_order = [
+                source for source in primary + fallback
+                if part.order_no and source.order_no == part.order_no
+            ]
+            seen = set()
+            for source in same_order:
+                key = (source.source_path, source.source_workbook)
+                if key not in seen:
+                    base["searched_workbooks"].append({"path": key[0], "workbook": key[1]})
+                    seen.add(key)
+            base["note"] = (
+                "已找到该订单的汇总表，但没有能唯一对应的零件行；请核对图纸和汇总表"
+                if base["searched_workbooks"]
+                else "未找到能够确认归属的汇总表记录；无法推断是哪一段错误"
+            )
         rows.append(base)
 
     errors = sum(row["status"] != "通过" for row in rows)
