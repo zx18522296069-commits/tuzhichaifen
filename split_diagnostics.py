@@ -109,6 +109,34 @@ def inspect_split(image: ImageData, primary: list[SourcePart], fallback: list[So
             "searched_workbooks": [],
             "note": "",
         }
+        # 只凭厚度、坡口和基础件数，即便在所有汇总表里恰好只
+        # 找到一条，也不算核对成功。图号未读到就不能认定其身份。
+        if not part.drawing_no:
+            physical_primary = [
+                source for source in primary
+                if (not part.order_no or source.order_no == part.order_no)
+                and source.thickness == part.thickness
+                and source.base_quantity == part.base_quantity
+                and source.bevel == part.bevel
+            ]
+            physical_fallback = [
+                source for source in fallback
+                if (not part.order_no or source.order_no == part.order_no)
+                and source.thickness == part.thickness
+                and source.base_quantity == part.base_quantity
+                and source.bevel == part.bevel
+            ]
+            candidates = physical_primary or physical_fallback
+            base["alternatives"] = [_source_ref(source) for source in candidates[:5]]
+            base["candidate_count"] = len(candidates)
+            base["note"] = (
+                f"图号未能从原图识别，不能与汇总表唯一核对；"
+                f"仅按厚度/坡口/件数找到 {len(candidates)} 条候选（仅列前 5 条），"
+                "需补读 PDF 原文或 OCR，禁止猜测图号"
+            )
+            rows.append(base)
+            continue
+
         primary_exact = find_candidates(part, primary)
         fallback_exact = find_candidates(part, fallback) if not primary_exact else []
         exact = primary_exact or fallback_exact
