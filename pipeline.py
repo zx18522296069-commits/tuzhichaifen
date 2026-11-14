@@ -272,6 +272,16 @@ def _merge_native_ocr_parts(
             continue
         if prior == candidate:
             continue
+        if prior.order_no and prior.drawing_no:
+            # Complete PDF-native fields have higher fidelity than OCR.
+            # Example: the original text says T100, while OCR sees T1100.
+            # Keep the authoritative native row; exact workbook matching
+            # still independently validates all five business fields.
+            LOGGER.warning(
+                "PDF 第 %d 页第 %d 号 OCR 与完整原生文字不同，保留 PDF 原生值；OCR=%s",
+                page_index, candidate.index, candidate,
+            )
+            continue
         same_values = (
             prior.thickness == candidate.thickness
             and prior.base_quantity == candidate.base_quantity
