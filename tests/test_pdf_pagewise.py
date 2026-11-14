@@ -86,6 +86,20 @@ class PdfPagewiseTests(unittest.TestCase):
         self.assertEqual(render_mock.call_args.args[2], 1)
         ocr_mock.assert_called_once_with(rendered)
 
+    def test_complete_native_fields_override_bad_ocr_numbers(self) -> None:
+        from pipeline import _merge_native_ocr_parts
+        native = (
+            ImagePart(1, "THP99-5000A-1023", "10B-02", 100, 8, "W", 6),
+        )
+        ocr = (
+            ImagePart(1, "THP99-5000A-1023", "10B-02", 1100, 8, "W", 6),
+            ImagePart(2, "THP99-5000A-1023", "10B-03", 100, 2, "P", 1),
+        )
+        actual = _merge_native_ocr_parts(native, ocr, 1)
+        self.assertEqual([part.index for part in actual], [1, 2])
+        self.assertEqual(actual[0].thickness, 100)
+        self.assertEqual(actual[1].drawing_no, "10B-03")
+
     def test_cross_page_conflict_is_rejected(self) -> None:
         left = (ImagePart(1, "ORDER-2026-0001", "1001-01", 40, 2, "P", 1),)
         right = (ImagePart(1, "ORDER-2026-0001", "1001-99", 40, 2, "P", 1),)
