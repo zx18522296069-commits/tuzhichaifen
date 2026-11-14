@@ -378,6 +378,69 @@ def _parse_pdf_by_page(
         ocr_pages,
     )
 
+def _partial_pdf_failure_diagnostics(
+    filename: str,
+    page_texts: list[str],
+    primary: list[SourcePart],
+    fallback: list[SourcePart],
+) -> dict | None:
+    """After PDF parsing fails, report any *provable* indexes from native text.
+
+    Only indexes observed in PDF text (or holes between them) are reported.
+    A missing tail index is unknowable without a readable printed total.
+    All rows are diagnostic only; the full file remains failed.
+    """
+    parsed: dict[int, ImagePart] = {}
+    conflicts: set[int] = set()
+    printed: set[int] = set()
+    for text in page_texts:
+        printed.update(_pdf_candidate_indexes(text))
+        try:
+            parts = _parse_pdf_page_parts(text, allow_gaps=True)
+        except ImageParseError:
+            continue
+        for part in parts:
+            previous = parsed.get(part.index)
+            if previous is not None and previous != part:
+                conflicts.add(part.index)
+            else:
+                parsed[part.index] = part
+
+    found_indexes = set(parsed) | printed
+    if not found_indexes:
+        return None
+    incomplete = ImageData(
+        original_filename=filename,
+        main_name=main_name_from_filename(filename),
+        program_no="",
+        marked_weight_kg=0.0,
+        parts=tuple(parsed[index] for index in sorted(parsed)),
+        ocr_text="",
+    )
+    report = inspect_split(incomplete, primary, fallback)
+    rows = {row["index"]: row for row in report["rows"]}
+    for index in range(1, max(found_indexes) + 1):
+        if index in rows and index not in conflicts:
+            continue
+        if index in conflicts:
+            note = "该号在不同页的原始文字内容冲突，无法确认哪一条正确"
+        elif index in printed:
+            note = "PDF 已出现该零件序号，但这一行的字段无法完整解析，不能定位汇总表行"
+        else:
+            note = "PDF 零件序号不连续，该号未能从原始文字提取到，不能推断其图号"
+        rows[index] = {
+            "index": index, "drawing_no": "", "actual": {},
+            "status": "未识别", "source": None, "differences": [],
+            "alternatives": [], "searched_workbooks": [], "note": note,
+        }
+    report["rows"] = [rows[index] for index in sorted(rows)]
+    report["checked_count"] = len(rows)
+    report["ok_count"] = sum(row["status"] == "通过" for row in rows.values())
+    report["error_count"] = len(rows) - report["ok_count"]
+    report["parse_incomplete"] = True
+    return report
+
+
 def _failure_detail(filename: str, exc: Exception) -> tuple[str, str, str]:
     """把技术异常转成前端和日志中可直接处理的中文说明。"""
     raw = str(exc).strip() or exc.__class__.__name__
@@ -478,6 +541,7 @@ def run_drive(
         for item in candidates:
             filename = item["name"]
             diagnostics: dict | None = None
+            native_page_texts: list[str] = []
             try:
                 suffix = Path(filename).suffix.lower() or ".jpg"
                 local_input = temp_dir / "inputs" / f"{item['id']}{suffix}"
@@ -525,11 +589,28 @@ def run_drive(
                 LOGGER.info("%s：%s -> %s", "验证完成" if dry_run else "处理完成", filename, result_path.name)
             except (DriveError, ImageParseError, MatchError, SourceReadError, ValueError, OSError) as exc:
                 stage, detail, suggestion = _failure_detail(filename, exc)
+                if diagnostics is None and item.get("mimeType") == PDF_MIME_TYPE and native_page_texts:
+                    diagnostics = _partial_pdf_failure_diagnostics(
+                        filename, native_page_texts, primary_parts, fallback_parts,
+                    )
+                    if diagnostics:
+                        LOGGER.info("SPLIT_FILE_CHECK_JSON=%s", json.dumps({
+                            "filename": filename, "board_id": diagnostics["board_id"],
+                            "checked_count": diagnostics["checked_count"],
+                            "ok_count": diagnostics["ok_count"],
+                            "error_count": diagnostics["error_count"],
+                            "parse_incomplete": True,
+                            "note": "PDF 原生文本只完成部分识别，下面的序号是能确认的范围；未知尾号不得猜测",
+                        }, ensure_ascii=False, separators=(",", ":")))
+                        for row in diagnostics["rows"]:
+                            LOGGER.info("SPLIT_CHECK_JSON=%s", json.dumps({
+                                "filename": filename, **row,
+                            }, ensure_ascii=False, separators=(",", ":")))
                 if diagnostics is None:
                     LOGGER.info("SPLIT_FILE_CHECK_JSON=%s", json.dumps({
                         "filename": filename, "board_id": main_name_from_filename(filename),
                         "checked_count": 0, "ok_count": 0, "error_count": 1,
-                        "note": f"{stage}：{str(exc)}",
+                        "note": f"{stage}：{str(exc)}；无法可靠识别具体零件序号",
                     }, ensure_ascii=False, separators=(",", ":")))
                 error = f"{stage}｜{detail}｜处理建议：{suggestion}"
                 run_items.append(RunItem(filename, "failed", error=error, stage=stage, suggestion=suggestion, diagnostics=diagnostics))
