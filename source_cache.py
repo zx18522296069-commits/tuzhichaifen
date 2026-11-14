@@ -10,7 +10,7 @@ from source_reader import SourceReadError, read_summary_workbook
 
 
 LOGGER = logging.getLogger("tuzhichaifen")
-CACHE_VERSION = 1
+CACHE_VERSION = 2  # 含汇总表原始行号；重建旧缓存以供精确定位
 WORKBOOK_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel.sheet.macroenabled.12",
