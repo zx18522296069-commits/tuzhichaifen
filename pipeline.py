@@ -30,6 +30,7 @@ from models import ImageData, ImagePart, SourcePart
 from pdf_renderer import PdfRenderError, extract_pdf_text_pages, render_pdf_page
 from source_cache import load_channel_cached
 from source_reader import SourceReadError
+from split_diagnostics import inspect_split
 
 
 LOGGER = logging.getLogger("tuzhichaifen")
@@ -47,6 +48,7 @@ class RunItem:
     error: str | None = None
     stage: str | None = None
     suggestion: str | None = None
+    diagnostics: dict | None = None  # 每个零件的五项对照和字符差异
 
 
 def _parse_pdf_native_text(filename: str, page_texts: list[str]) -> ImageData:
@@ -475,6 +477,7 @@ def run_drive(
 
         for item in candidates:
             filename = item["name"]
+            diagnostics: dict | None = None
             try:
                 suffix = Path(filename).suffix.lower() or ".jpg"
                 local_input = temp_dir / "inputs" / f"{item['id']}{suffix}"
@@ -493,6 +496,24 @@ def run_drive(
                         LOGGER.info("PDF 逐页原生文本解析成功：%s（未使用 OCR）", filename)
                 else:
                     image = parse_image(local_input, original_filename=filename)
+                # 对整张板逐号核验；即使前几号不一致，也要把后续所有号查完。
+                # 结果分别按行写入 Actions 日志，控制台无需猜测或解析一大段错误文字。
+                diagnostics = inspect_split(image, primary_parts, fallback_parts)
+                LOGGER.info("SPLIT_FILE_CHECK_JSON=%s", json.dumps({
+                    key: diagnostics[key]
+                    for key in ("filename", "board_id", "checked_count", "ok_count", "error_count")
+                }, ensure_ascii=False, separators=(",", ":")))
+                for row in diagnostics["rows"]:
+                    LOGGER.info("SPLIT_CHECK_JSON=%s", json.dumps({
+                        "filename": filename, **row,
+                    }, ensure_ascii=False, separators=(",", ":")))
+                if diagnostics["error_count"]:
+                    failed_indexes = [str(row["index"]) for row in diagnostics["rows"] if row["status"] != "通过"]
+                    raise MatchError(
+                        f"逐号核对 {diagnostics['checked_count']} 条，"
+                        f"{diagnostics['error_count']} 条不一致或无法唯一确认；"
+                        f"问题序号：{','.join(failed_indexes)}；请在前端查看逐号差异"
+                    )
                 matches = match_with_priority(image, primary_parts, fallback_parts)
                 result_path = output_dir / f"{image.main_name}_完成.xlsx"
                 write_result(result_path, image, matches)
@@ -500,12 +521,18 @@ def run_drive(
                 if not dry_run:
                     drive.upsert_file(results["id"], result_path, XLSX_MIME)
                     drive.rename(item["id"], f"{settings.completed_prefix}{filename}")
-                run_items.append(RunItem(filename, "dry-run" if dry_run else "completed", result_path.name))
+                run_items.append(RunItem(filename, "dry-run" if dry_run else "completed", result_path.name, diagnostics=diagnostics))
                 LOGGER.info("%s：%s -> %s", "验证完成" if dry_run else "处理完成", filename, result_path.name)
             except (DriveError, ImageParseError, MatchError, SourceReadError, ValueError, OSError) as exc:
                 stage, detail, suggestion = _failure_detail(filename, exc)
+                if diagnostics is None:
+                    LOGGER.info("SPLIT_FILE_CHECK_JSON=%s", json.dumps({
+                        "filename": filename, "board_id": main_name_from_filename(filename),
+                        "checked_count": 0, "ok_count": 0, "error_count": 1,
+                        "note": f"{stage}：{str(exc)}",
+                    }, ensure_ascii=False, separators=(",", ":")))
                 error = f"{stage}｜{detail}｜处理建议：{suggestion}"
-                run_items.append(RunItem(filename, "failed", error=error, stage=stage, suggestion=suggestion))
+                run_items.append(RunItem(filename, "failed", error=error, stage=stage, suggestion=suggestion, diagnostics=diagnostics))
                 LOGGER.error("处理失败｜阶段=%s｜%s｜处理建议=%s", stage, detail, suggestion)
 
     report_path = output_dir / "run_report.json"
