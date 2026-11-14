@@ -54,7 +54,7 @@ _DRAWING_OCR_ALIASES = {"帅耳": "吊耳"}
 # the following four-digit drawing group.
 _COMPACT_PART_RE = re.compile(
     r"^\s*(?P<index>\d+)\s*"
-    r"(?P<order>[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{4})"
+    r"(?P<order>[A-Z0-9.]+(?:-[A-Z0-9.]+)*-\d{4})"
     r"(?P<drawing>\d{4}-\d{2}(?:\.\d+)?)"
     r"T\s*(?P<thickness>\d+(?:[.,]\d+)?)"
     r"(?P<base_quantity>\d+)J\s*(?:(?P<bevel>P(?:\s*[A-Z0-9])*|[A-OQ-Z][A-Z0-9]*)\s*)?[X×]\s*(?P<split_quantity>\d+)(?=$|[^A-Z0-9])",
