@@ -52,6 +52,21 @@ class SplitDiagnosticTests(unittest.TestCase):
         self.assertEqual(report["rows"][1]["differences"][0]["actual"], "P2F")
         self.assertEqual(report["rows"][1]["differences"][0]["expected"], "P1F")
 
+    def test_missing_drawing_never_passes_even_if_physical_signature_unique(self) -> None:
+        # 只识别 T60/W/4J 不能认定是哪个图号。
+        source = SourcePart(
+            self.order, "1004-08", 60, 4, "W", 200.0,
+            self.folder, self.book, 19,
+        )
+        part = ImagePart(1, "", "", 60, 4, "W", 2)
+        report = inspect_split(self.image((part,)), [source], [])
+        row = report["rows"][0]
+        self.assertEqual(row["status"], "待核对")
+        self.assertIsNone(row["source"])
+        self.assertEqual(row["candidate_count"], 1)
+        self.assertEqual(row["alternatives"][0]["drawing_no"], "1004-08")
+        self.assertIn("图号未能从原图识别", row["note"])
+
     def test_ambiguity_is_not_a_guessed_match(self) -> None:
         part = ImagePart(7, self.order, "1004-0B", 20, 4, "P1F", 1)
         report = inspect_split(
