@@ -159,6 +159,7 @@ def read_summary_workbook(path: Path, source_path: str) -> list[SourcePart]:
                 total_weight_kg=total_weight_kg,
                 source_path=source_path,
                 source_workbook=path.name,
+                row_number=row_no,
             )
         )
     return result
