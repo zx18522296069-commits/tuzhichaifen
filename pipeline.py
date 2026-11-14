@@ -589,13 +589,38 @@ def run_drive(
                     # the original result table can show every failing part,
                     # source workbook/row and complete conflicting field.
                     # Do not rely on a separately deployed control API release.
+                    # A large nesting board may have dozens of failing
+                    # indexes that share the same candidate source rows.
+                    # Deduplicate the source references to keep the single
+                    # GitHub Actions error line below GitHub's line limit.
+                    source_catalog: list[dict] = []
+                    source_keys: dict[str, int] = {}
+
+                    def source_id(source: dict | None) -> int | None:
+                        if source is None:
+                            return None
+                        key = json.dumps(source, ensure_ascii=False, sort_keys=True)
+                        if key not in source_keys:
+                            source_keys[key] = len(source_catalog)
+                            source_catalog.append(source)
+                        return source_keys[key]
+
+                    compact_rows: list[dict] = []
+                    for failed_row in failed_rows:
+                        compact = dict(failed_row)
+                        compact["source"] = source_id(failed_row.get("source"))
+                        compact["alternatives"] = [
+                            source_id(source) for source in failed_row.get("alternatives", [])
+                        ]
+                        compact_rows.append(compact)
                     inline_payload = {
-                        "version": 1,
+                        "version": 2,
                         "filename": filename,
                         "checked_count": diagnostics["checked_count"],
                         "ok_count": diagnostics["ok_count"],
                         "error_count": diagnostics["error_count"],
-                        "rows": failed_rows,
+                        "sources": source_catalog,
+                        "rows": compact_rows,
                     }
                     inline_token = base64.urlsafe_b64encode(
                         json.dumps(inline_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
